@@ -16,8 +16,8 @@ ob-crypt \- cryptographic toolkit for classical and modern ciphers
 .B ob-crypt chain \-\-steps \fIsteps\fR [\-\-detect] [\fIoptions\fR] \fIinput\fR
 .SH DESCRIPTION
 Obscuron Crypto Suite's command-line interface. Reads input from an inline
-argument, a file (\fB\-f\fR), or stdin and applies one of over 70 cipher
-operations. Designed for speed with zero external dependencies (only the C++
+argument, a file (\fB\-f\fR), or stdin and applies one of over 100 cipher
+and attack operations. Designed for speed with zero external dependencies (only the C++
 standard library).
 .PP
 Output is printed to stdout. Combined with \fB\-\-hex\-input\fR and
@@ -242,7 +242,7 @@ XOR input bytes against \fIhex_key\fR (repeating). Specify the key as a
 hexadecimal string.
 .TP
 .B base_encode \-b \fIbase\fR \fIinput\fR
-Encode input as a big integer in \fIbase\fR (2\(en62). Uses O(1) memory.
+Encode input as a big integer in \fIbase\fR (2\(en85). Uses O(1) memory.
 .TP
 .B base_decode \-b \fIbase\fR \fIinput\fR
 Decode a big-integer base string back to raw bytes. Expects
@@ -268,10 +268,13 @@ AES in CBC mode. IV must be 16 bytes (32 hex chars).
 .TP
 .B aes-ctr \-k \fIhex_key\fR \-i \fIhex_iv\fR [\-\-decrypt] \fIinput\fR
 AES in CTR mode. Encrypt and decrypt are the same XOR operation.
-.SS "ChaCha20 Stream Cipher"
+.SS "Stream Ciphers"
 .TP
 .B chacha20 \-k \fIhex_key\fR \-i \fIhex_nonce\fR [\-\-counter \fIN\fR] \fIinput\fR
 ChaCha20 stream cipher. Key is 32 bytes (64 hex chars), nonce is 12 bytes (24 hex chars). Encrypt and decrypt are the same operation.
+.TP
+.B salsa20 \-k \fIhex_key\fR \-i \fIhex_nonce\fR [\-\-counter \fIN\fR] \fIinput\fR
+Salsa20/20 stream cipher. Key is 32 bytes (64 hex chars), nonce is 8 bytes (16 hex chars). 4x4 state matrix with column and row double rounds. Parent of ChaCha20.
 .SS "Message Authentication"
 .TP
 .B hmac-sha256 \-k \fIkey\fR \fIinput\fR
@@ -401,6 +404,76 @@ Encode an integer in big-endian byte order (default 4 bytes).
 .TP
 .B proper-base \-\-bits \fIN\fR [\-k \fIalphabet\fR] \fIinput\fR
 Chunk-oriented base encoding that preserves leading zeros. \fB\-\-bits\fR 6=base64, 5=base32, 4=hex.
+.SS "Encoding & Detection"
+.TP
+.B hex [\-\-hex\-input] \fIinput\fR
+Decode a hexadecimal string to raw bytes. Accepts optional 0x prefix and
+auto-pads odd lengths.
+.TP
+.B base64 [\-\-hex\-input] \fIinput\fR
+Decode a Base64 (RFC 4648) string to raw bytes. Standard alphabet with
+.B +/ and = padding.
+.\" ── Attack Modules ──────────────────────────────────────────────
+.SS "Attack Modules"
+.TP
+.B ecb-detect [\-\-hex \fIhex\fR] \fIinput\fR
+Detect AES-ECB mode by finding repeated 16-byte blocks. Prints block
+counts, detect result, and block size. Supply hex via \fB\-\-hex\fR or
+pipe raw data.
+.TP
+.B cbc-padding-oracle \-c \fIhex\fR \-i \fIhex\fR \-\-oracle \fIcmd\fR
+CBC padding oracle attack. Recovers plaintext byte-by-byte by querying
+an external oracle command. The oracle receives \fIct_hex:iv_hex\fR on
+stdin and must exit 0 for valid padding. Supports \fB\-\-block\-size\fR
+(default 16) and \fB\-\-timeout\-ms\fR (default 5000).
+.TP
+.B hash-extend \-\-hash \fItype\fR \-\-known-hash \fIhex\fR \-\-known-len \fIbytes\fR \-\-append \fIstr\fR
+Hash length extension attack. Given a hash of \fIsecret + message\fR,
+computes \fIhash(secret + message + padding + append)\fR without
+knowing the secret. Supports md5, sha1, sha256.
+.TP
+.B ecdsa-nonce-reuse \-\-r1 \fIhex\fR \-\-s1 \fIhex\fR \-\-s2 \fIhex\fR \-\-h1 \fIhex\fR \-\-h2 \fIhex\fR \-\-n \fIhex\fR [\-\-r2 \fIhex\fR]
+ECDSA nonce reuse attack. Recovers the private key from two signatures
+that share the same ephemeral nonce \fIk\fR. Provide both \fI(r, s)\fR
+pairs and their message hashes \fIh1, h2\fR, plus curve order \fIn\fR.
+\fB\-\-r2\fR defaults to \fB\-\-r1\fR.
+.TP
+.B dh-check \-\-g \fIhex\fR \-\-p \fIhex\fR [\-\-pubkey-a \fIhex\fR] [\-\-pubkey-b \fIhex\fR]
+DH weak parameters check. Factors \fIp-1\fR up to 10^6 to assess
+smoothness. If fully smooth and both public keys are provided, attempts
+Pohlig-Hellman key recovery.
+.TP
+.B zip-crack \-\-zip \fIfile\fR (\-\-known \fIstr\fR | \-\-known-hex \fIhex\fR) [\-o \fIfile\fR]
+ZipCrypto known-plaintext attack. Recovers encryption keys from an
+encrypted ZIP file using at least 12 bytes of known plaintext. Uses
+Biham-Kocher graph search. Decrypts and decompresses the entry on
+success.
+.TP
+.B shamir-reconstruct \-\-shares \fIstr\fR \-\-prime \fIhex\fR
+Shamir's secret reconstruction via Lagrange interpolation. Shares format:
+\fIx1:y1,x2:y2,...,xk:yk\fR. Requires at least 2 shares.
+.TP
+.B gf256-mul \-\-a \fIhex\fR \-\-b \fIhex\fR [\-\-poly \fIhex\fR]
+GF(2^8) multiplication. Default polynomial is the AES irreducible
+polynomial 0x11b.
+.TP
+.B gf256-inv \-\-a \fIhex\fR [\-\-poly \fIhex\fR]
+GF(2^8) multiplicative inverse. Returns the byte \fBa^{-1}\fR in the
+field. 0x00 maps to 0x00 by convention.
+.\" ── TLS Utilities ───────────────────────────────────────────────
+.SS "TLS Utilities"
+.TP
+.B tls-fingerprint \fIinput\fR
+Analyze TLS handshake data, PEM certificates, or DER keys. Detects TLS
+version (1.0\(en1.3), key exchange algorithm, cipher suite, MAC, key
+size, PEM/DER format, and PKCS#1 padding. Reports risk flags (DROWN,
+POODLE, BEAST, ROBOT) and suggests attacks.
+.TP
+.B parse-cert \fIinput\fR
+Parse X.509 certificates (PEM, hex, or raw DER). Extracts subject,
+issuer, validity period, serial number, public key algorithm, RSA
+modulus/exponent, SHA-256 fingerprint, SAN entries, and key usage.
+Detects self-signed certificates.
 .SH EXIT STATUS
 .TP
 0
@@ -509,29 +582,32 @@ Sign a JWT
 Single-byte XOR brute-force
 .B ob-crypt brute-xor --hex-input "$(echo -n 'Hello' | ob-crypt xor -k '1b')"
 .SH CIPHER INDEX
-The following ciphers are available via
+The following 100 commands are available via
 .BR "ob-crypt \-\-list" :
 .PP
 .ad l
 .nf
 a1z26        adfgvx       aes-cbc      aes-ctr      aes-ecb
 affine       analyze      argon2id     atbash       autokey
-bacon        base_decode  base_encode  beaufort     bifid
-big-endian   binary       blake2b      blake2s      blowfish
-braille      brute-caesar brute-railfence brute-rotate brute-vigenere
-brute-xor    caesar       chain        chacha20     columnar
-custom-rot   des          des3         detect       dlp-bsgs
-dlp-pohlig   ec-add       ec-mul       enigma       four-square
-hex-xor      hmac-sha256  hmac-sha512  jwt-parse    jwt-sign
-keyboard-shift keyword     lll          large        little-endian
-lsb-embed    lsb-extract  md5          morse        octal
+bacon        base64       base_decode  base_encode  beaufort
+bifid        big-endian   binary       blake2b      blake2s
+blowfish     braille      brute-caesar brute-railfence brute-rotate
+brute-vigenere brute-xor  caesar       cbc-padding-oracle chain
+chacha20     columnar     custom-rot   des          des3
+detect       dh-check     dlp-bsgs     dlp-pohlig   ec-add
+ec-mul       ecb-detect   ecdsa-nonce-reuse enigma   four-square
+gf256-inv    gf256-mul    hash-extend  hex          hex-xor
+hmac-sha256  hmac-sha512  jwt-parse    jwt-sign     keyboard-shift
+keyword      large        little-endian lll         lsb-embed
+lsb-extract  md5          morse        octal        parse-cert
 pbkdf2       playfair     poly1305     polybius     proper-base
 qr           railfence    rc4          rot13        rot47
 rot8000      rsa-common-modulus rsa-decrypt rsa-encode
-rsa-factor-fermat rsa-factor-pollard rsa-hastad rsa-info rsa-parity-oracle
-rsa-wiener   scytale      sha1         sha256       sha512
-str-xor      substitution substitution-solve trifid  urlcode
-vigenere     xor
+rsa-factor-fermat rsa-factor-pollard rsa-hastad rsa-info
+rsa-parity-oracle rsa-wiener salsa20    scytale      sha1
+sha256       sha512       shamir-reconstruct str-xor substitution
+substitution-solve trifid  tls-fingerprint urlcode
+vigenere     xor          zip-crack
 .fi
 .ad
 .PP

@@ -1,6 +1,7 @@
 #include "menuwindow.h"
 #include "mainwindow.h"
 #include "numberwindow.h"
+#include "settings_dialog.h"
 #include "includes.h"
 #include "colours.h"
 
@@ -91,16 +92,22 @@ MenuWindow::MenuWindow(QWidget *parent) : QMainWindow(parent) {
 
     connect(btnCipher, &QPushButton::clicked, this, &MenuWindow::onCipherClicked);
     connect(btnNumber, &QPushButton::clicked, this, &MenuWindow::onNumberClicked);
+    connect(btnSettings, &QPushButton::clicked, this, [this]{
+        SettingsDialog dlg(this);
+        dlg.exec();
+    });
 }
 
 void MenuWindow::onCipherClicked() {
     MainWindow *w = new MainWindow();
+    w->setAttribute(Qt::WA_DeleteOnClose);
     w->show();
-    this->hide();
+    this->close();
 }
 
 void MenuWindow::onNumberClicked() {
     NumberWindow *w = new NumberWindow();
+    w->setAttribute(Qt::WA_DeleteOnClose);
     w->show();
-    this->hide();
+    this->close();
 }

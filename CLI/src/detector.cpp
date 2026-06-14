@@ -1,4 +1,5 @@
 #include "../includes/detector.h"
+#include "../includes/branch_explorer.h"
 #include "../includes/basic_ciphers.h"
 #include "../includes/historical_ciphers.h"
 #include "../includes/essential_ciphers.h"
@@ -895,6 +896,7 @@ static std::vector<CipherCandidate> pass_xor(const std::string &input) {
 }
 
 static std::vector<CipherCandidate> pass_substitution(const std::string &input) {
+    if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc = compute_ioc(input);
     if (ioc > 0.055) {
@@ -912,6 +914,7 @@ static std::vector<CipherCandidate> pass_substitution(const std::string &input) 
 }
 
 static std::vector<CipherCandidate> pass_vigenere(const std::string &input) {
+    if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc = compute_ioc(input);
     if (ioc >= 0.035 && ioc <= 0.065) {
@@ -929,6 +932,7 @@ static std::vector<CipherCandidate> pass_vigenere(const std::string &input) {
 }
 
 static std::vector<CipherCandidate> pass_columnar(const std::string &input) {
+    if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc = compute_ioc(input);
     double score_plain = score_english_combined(input);
@@ -1084,6 +1088,7 @@ static std::vector<CipherCandidate> pass_polybius(const std::string &input) {
 }
 
 static std::vector<CipherCandidate> pass_beaufort(const std::string &input) {
+    if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc_v = compute_ioc(input);
     if (ioc_v >= 0.030 && ioc_v <= 0.070) {
@@ -1107,6 +1112,7 @@ static std::vector<CipherCandidate> pass_beaufort(const std::string &input) {
 }
 
 static std::vector<CipherCandidate> pass_autokey(const std::string &input) {
+    if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc_v = compute_ioc(input);
     if (ioc_v >= 0.030 && ioc_v <= 0.070) {
@@ -1130,6 +1136,7 @@ static std::vector<CipherCandidate> pass_autokey(const std::string &input) {
 }
 
 static std::vector<CipherCandidate> pass_adfgvx(const std::string &input) {
+    if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     std::string clean;
     for (unsigned char ch : input)
@@ -1731,22 +1738,30 @@ static void detect_cipher_internal(
 
     if (depth < MAX_DEPTH - 1 && !candidates.empty()) {
         CipherCandidate &best = candidates[0];
-        if (best.confidence < 0.90 && best.decrypted != input) {
+        if (best.decrypted != input) {
             double chi = score_english_combined(best.decrypted);
             if (chi > RECURSE_CHI_SQ && !best.decrypted.empty()) {
-                std::vector<CipherCandidate> sub_candidates;
-                int sub_count = 0;
-                std::string best_name = best.cipher_name;
-                double best_conf = best.confidence;
-                detect_cipher_internal(best.decrypted, top_n, depth + 1,
-                                        sub_count, sub_candidates);
-                for (auto &sub : sub_candidates) {
-                    if (candidate_count >= MAX_CANDIDATES) break;
-                    sub.cipher_name = best_name + "+" + sub.cipher_name;
-                    sub.confidence = best_conf * 0.6 + sub.confidence * 0.4;
-                    if (sub.confidence > 0.95) sub.confidence = 0.95;
-                    candidates.push_back(sub);
-                    candidate_count++;
+                if (BranchExplorer::should_branch(candidates, input)) {
+                    BranchExplorer explorer(2, 3);
+                    auto branch_results = explorer.explore(input, candidates, top_n);
+                    for (size_t i = 0; i < branch_results.size() && i < candidates.size(); i++) {
+                        auto &result = branch_results[i];
+                        candidates[i].confidence = compute_branch_score(candidates[i], result.sub_candidates);
+                        candidates[i].was_branched = true;
+                        if (!result.sub_candidates.empty()
+                            && result.sub_candidates[0].confidence > 0.70
+                            && score_english_combined(result.sub_candidates[0].decrypted) < 30.0) {
+                            if (candidate_count >= MAX_CANDIDATES) break;
+                            CipherCandidate new_c;
+                            new_c.cipher_name = candidates[i].cipher_name + "+" + result.sub_candidates[0].cipher_name;
+                            new_c.decrypted = result.sub_candidates[0].decrypted;
+                            new_c.confidence = candidates[i].confidence * 0.5 + result.sub_candidates[0].confidence * 0.5;
+                            new_c.key = result.sub_candidates[0].key;
+                            new_c.was_branched = true;
+                            candidates.push_back(new_c);
+                            candidate_count++;
+                        }
+                    }
                 }
             }
         }

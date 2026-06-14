@@ -12,5 +12,7 @@ HandlerMap register_all_handlers() {
     register_bytes_handlers(map);
     register_detector_handlers(map);
     register_rsa_handlers(map);
+    register_attack_handlers(map);
+    register_tls_handlers(map);
     return map;
 }

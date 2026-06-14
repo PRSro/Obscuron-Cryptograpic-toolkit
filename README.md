@@ -49,22 +49,19 @@ Both binaries compile the same cipher sources from `CLI/src/` against `CLI/inclu
 
 ---
 
-## Ciphers & Operations
+## Ciphers & Operations (100 CLI Commands)
 
 ### Basic Ciphers
-| Operation | Description |
-|-----------|-------------|
-| `custom_rot` | Rotate letters by arbitrary shift |
+| Command | Description |
+|---------|-------------|
+| `custom-rot` | Rotate letters by arbitrary shift |
 | `rot13` | ROT13 (shift by 13) |
 | `a1z26` | A1Z26 encoding (A=1, B=2, ...) |
-| `keyboard_shift` | Shift characters on a QWERTY keyboard layout |
-| `split` | Split string into characters |
-| `reverser` | Reverse a string |
-| `base_convert` | Convert a number between arbitrary bases (2–62) |
+| `keyboard-shift` | Shift characters on a QWERTY keyboard layout |
 
 ### Historical / Classical Ciphers
-| Operation | Description |
-|-----------|-------------|
+| Command | Description |
+|---------|-------------|
 | `atbash` | Atbash substitution (reverse alphabet) |
 | `affine` | Affine cipher: `E(x) = (ax + b) mod 26` |
 | `caesar` | Caesar cipher (shift by key) |
@@ -78,87 +75,127 @@ Both binaries compile the same cipher sources from `CLI/src/` against `CLI/inclu
 | `playfair` | Playfair digraph substitution (5×5 grid) |
 | `bifid` | Bifid cipher (combining substitution & transposition) |
 | `trifid` | Trifid cipher (3D extension of Bifid) |
-| `four_square` | Four-Square cipher (digraph substitution) |
+| `four-square` | Four-Square cipher (digraph substitution) |
 | `adfgvx` | ADFGVX cipher (Polybius + columnar transposition) |
 | `bacon` | Baconian cipher (5-letter binary encoding) |
 | `morse` | Morse code encode/decode |
 | `braille` | Braille dot-pattern encode/decode |
+| `enigma` | Enigma machine simulation (configurable rotors, offsets, plugboard) |
 
 ### Essential / Encoding Ciphers
-| Operation | Description |
-|-----------|-------------|
-| `large_encrypt` / `large_decrypt` | Big-integer base conversion (base 2–62) using GMP |
-| `hex_xor` / `str_xor` | XOR a string against a hex key or another string |
+| Command | Description |
+|---------|-------------|
+| `base_encode` / `base_decode` | Big-integer base conversion (base 2–85) |
+| `hex` | Decode hex string to raw bytes |
+| `base64` | Decode Base64 (RFC 4648) to raw bytes |
+| `hex-xor` / `str-xor` | XOR a string against a hex byte or another string |
+| `large` | Combined base encode/decode wrapper |
 | `urlcode` | URL percent-encoding encode/decode |
 | `rot8000` | Unicode-aware rotation through BMP code points |
 | `octal` | Octal encoding/decoding |
 | `binary` | Binary encoding/decoding |
 
 ### Standard Ciphers & Cryptanalysis
-| Operation | Description |
-|-----------|-------------|
+| Command | Description |
+|---------|-------------|
 | `rot47` | ROT47 (printable ASCII shift by 47) |
-| `keyword_cipher` | Keyword-based monoalphabetic substitution |
-| `substitution` | Arbitrary substitution cipher (encrypt/decrypt/solve) |
-| `frequency_analysis` | Letter frequency distribution (A–Z) |
-| `index_of_coincidence` | Compute IoC for polyalphabetic detection |
-| `find_key_lengths` | Kasiski examination — find probable key lengths |
+| `keyword` | Keyword-based monoalphabetic substitution |
+| `substitution` | Arbitrary substitution cipher (encrypt/decrypt) |
+| `substitution-solve` | Auto-solve substitution cipher via frequency analysis |
 
 ### Outdated / Weak Ciphers
-| Operation | Description |
-|-----------|-------------|
+| Command | Description |
+|---------|-------------|
 | `rc4` | RC4 stream cipher |
-| `des_ecb` | DES in ECB mode (56-bit key) |
-| `des3_ecb` | Triple-DES in ECB mode |
-| `blowfish_ecb` | Blowfish in ECB mode |
-| `enigma` | Enigma machine simulation (configurable rotors, offsets, plugboard) |
+| `des` | DES in ECB mode (56-bit key) |
+| `des3` | Triple-DES in ECB mode |
+| `blowfish` | Blowfish in ECB mode |
 
 ### Modern Ciphers & Cryptography
-| Operation | Description |
-|-----------|-------------|
+| Command | Description |
+|---------|-------------|
 | **Hashes** | |
-| `md5_hash` | MD5 (128-bit digest) |
-| `sha1_hash` | SHA-1 (160-bit digest) |
-| `sha256_hash` | SHA-256 (256-bit digest) |
-| `sha512_hash` | SHA-512 (512-bit digest) |
-| `blake2b_hash` | BLAKE2b (keyed or unkeyed, up to 512-bit) |
-| `blake2s_hash` | BLAKE2s (keyed or unkeyed, up to 256-bit) |
+| `md5` | MD5 (128-bit digest) |
+| `sha1` | SHA-1 (160-bit digest) |
+| `sha256` | SHA-256 (256-bit digest) |
+| `sha512` | SHA-512 (512-bit digest) |
+| `blake2b` | BLAKE2b (keyed or unkeyed, up to 512-bit) |
+| `blake2s` | BLAKE2s (keyed or unkeyed, up to 256-bit) |
 | **MAC / KDF** | |
-| `hmac_sha256` / `hmac_sha512` | HMAC with SHA-256 / SHA-512 |
-| `pbkdf2_sha256` | PBKDF2 key derivation (configurable iterations & output length) |
-| `argon2id_hash` | Argon2id memory-hard KDF |
+| `hmac-sha256` / `hmac-sha512` | HMAC with SHA-256 / SHA-512 |
+| `pbkdf2` | PBKDF2 key derivation |
+| `argon2id` | Argon2id memory-hard KDF |
 | **Symmetric** | |
-| `aes_encrypt` / `aes_decrypt` | AES (ECB / CBC / CTR modes, 128/192/256-bit keys) |
-| `chacha20_crypt` | ChaCha20 stream cipher |
-| `poly1305_mac` | Poly1305 one-time authenticator |
+| `aes-ecb` / `aes-cbc` / `aes-ctr` | AES (ECB / CBC / CTR modes, 128/192/256-bit keys) |
+| `chacha20` | ChaCha20 stream cipher |
+| `salsa20` | Salsa20/20 stream cipher |
+| `poly1305` | Poly1305 one-time authenticator |
 | **Other** | |
-| `base64` / `base64url` | Base64 and Base64URL encode/decode |
-| `jwt_parse` / `jwt_sign` | JSON Web Token parsing and signing |
-| `generate_qr_matrix` | QR code matrix generation |
-| `lsb_embed` / `lsb_extract` | LSB steganography (embed/extract text in carrier data) |
+| `xor` | XOR with repeating hex key |
+| `jwt-parse` / `jwt-sign` | JSON Web Token parsing and signing |
+| `qr` | QR code matrix generation (ASCII art) |
+| `lsb-embed` / `lsb-extract` | LSB steganography (embed/extract text in carrier data) |
+
+### RSA & Public-Key Attacks
+| Command | Description |
+|---------|-------------|
+| `rsa-encode` / `rsa-decrypt` | RSA encrypt/decrypt (with optional CRT) |
+| `rsa-info` | Analyze RSA key: bit size, exponent quality, Wiener feasibility |
+| `rsa-wiener` | Wiener's continued-fraction attack (small d) |
+| `rsa-hastad` | Hastad's broadcast attack (e identical encryptions, different moduli) |
+| `rsa-common-modulus` | Common modulus attack (coprime exponents) |
+| `rsa-factor-fermat` | Fermat factorization (close primes) |
+| `rsa-factor-pollard` | Pollard's Rho factorization |
+| `rsa-parity-oracle` | LSB parity oracle attack (Bleichenbacher-style) |
+
+### Elliptic Curve & Discrete Log
+| Command | Description |
+|---------|-------------|
+| `ec-add` | EC point addition: `P + Q` on `y² = x³ + ax + b` (mod p) |
+| `ec-mul` | EC scalar multiplication: `k * P` |
+| `dlp-bsgs` | Baby-step giant-step DLP solver |
+| `dlp-pohlig` | Pohlig-Hellman DLP solver (smooth order) |
+| `lll` | LLL lattice reduction (NTL FP variant) |
+| `dh-check` | DH weak parameters check (p-1 smoothness, key recovery) |
+
+### Attack Modules (CTF)
+| Command | Description |
+|---------|-------------|
+| `ecb-detect` | AES-ECB block-repeat detection |
+| `cbc-padding-oracle` | CBC padding oracle attack (external oracle) |
+| `hash-extend` | Hash length extension (MD5, SHA-1, SHA-256) |
+| `ecdsa-nonce-reuse` | ECDSA nonce reuse → private key recovery |
+| `zip-crack` | ZipCrypto known-plaintext attack (Biham-Kocher) |
+| `shamir-reconstruct` | Shamir's secret reconstruction (Lagrange interpolation) |
+| `gf256-mul` / `gf256-inv` | GF(2⁸) arithmetic (AES field) |
+
+### TLS Utilities
+| Command | Description |
+|---------|-------------|
+| `tls-fingerprint` | Analyze TLS handshake / PEM / DER keys |
+| `parse-cert` | Parse X.509 certificates (PEM, hex, DER) |
 
 ### Brute-Force Tools
-| Operation | Description |
-|-----------|-------------|
-| `brute_rot_all` | Try all 26 ROT/shift variations |
-| `brute_caesar_all` | Try all 25 Caesar shifts |
-| `brute_railfence_all` | Brute-force Rail Fence with key up to N |
-| `brute_xor_single_byte` | Try all 256 single-byte XOR keys |
-| `brute_vigenere_keylength` | Brute-force Vigenere key up to given length |
+| Command | Description |
+|---------|-------------|
+| `brute-rotate` | Try all 26 ROT/shift variations |
+| `brute-caesar` | Try all 25 Caesar shifts |
+| `brute-railfence` | Brute-force Rail Fence with key up to N |
+| `brute-xor` | Try all 256 single-byte XOR keys |
+| `brute-vigenere` | Brute-force Vigenere key up to given length |
 
 ### Detection & Analysis
-| Operation | Description |
-|-----------|-------------|
+| Command | Description |
+|---------|-------------|
 | `detect` | Automatic cipher detection (top-N candidates with confidence) |
-| `analyze` | Statistical analysis (encoding, length, IoC, entropy, byte distribution, letter frequencies) |
-| `chain` | Multi-step cipher pipeline (sequential encode/decode with optional detection) |
+| `analyze` | Statistical analysis (encoding, IoC, entropy, byte distribution) |
+| `chain` | Multi-step cipher pipeline with optional auto-detect |
 
 ### Byte Utilities
-| Operation | Description |
-|-----------|-------------|
-| `little_endian_encode` / `big_endian_encode` | Encode integer to N-byte endian representation |
-| `little_endian_decode` / `big_endian_decode` | Decode endian bytes to integer |
-| `proper_base_convert` | Chunk-oriented base encoding (preserves leading zeros) |
+| Command | Description |
+|---------|-------------|
+| `little-endian` / `big-endian` | Encode integer to N-byte endian representation |
+| `proper-base` | Chunk-oriented base encoding (preserves leading zeros) |
 
 ---
 
@@ -204,7 +241,7 @@ echo "hello world" | ./ob-crypt caesar -s 7
 ./ob-crypt vigenere -k secret --decrypt "olssv dvysk"
 
 # Encode to base64
-./ob-crypt large_encrypt -b 64 "hello"
+./ob-crypt base_encode -b 64 "hello"
 
 # Automatic cipher detection
 ./ob-crypt detect "uryyb jbeyq"
@@ -219,10 +256,15 @@ echo "hello world" | ./ob-crypt caesar -s 7
 ./ob-crypt enigma -r "1,2,3" -o "0,0,0" -p "0:1,2:3" "HELLO"
 
 # Brute-force single-byte XOR
-./ob-crypt brute_xor
+./ob-crypt brute-xor < cipher.bin
 
-# AES encryption (via GUI binary or imported in chain)
-# See --list for all available ciphers
+# ChaCha20 encryption
+./ob-crypt chacha20 -k "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" -i "0102030405060708090a0b0c" "hello"
+
+# ZipCrypto known-plaintext attack
+./ob-crypt zip-crack --zip secret.zip --known "knownplaintext"
+
+# All 100 commands
 ./ob-crypt --list
 ```
 

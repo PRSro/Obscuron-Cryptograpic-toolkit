@@ -10,10 +10,8 @@ void register_essential_handlers(HandlerMap &map) {
     };
 
     map["base_decode"] = [](const Context &ctx) {
-        std::string dec;
-        for (char c : ctx.input) dec += (char)std::tolower((unsigned char)c);
         std::string out;
-        large_decrypt(dec, out, ctx.int_flag("-b"));
+        large_decrypt(ctx.input, out, ctx.int_flag("-b"));
         print_result(ctx, out);
     };
 
@@ -22,7 +20,6 @@ void register_essential_handlers(HandlerMap &map) {
         std::string out;
         if (ctx.has("--decrypt")) {
             std::string dec;
-            for (char c : ctx.input) dec += (char)std::tolower((unsigned char)c);
             large_decrypt(dec, out, base);
         } else {
             large_encrypt(ctx.input, out, base);

@@ -66,6 +66,15 @@ void register_modern_handlers(HandlerMap &map) {
         print_result(ctx, out);
     };
 
+    map["salsa20"] = [](const Context &ctx) {
+        std::string k = hex_decode_str(ctx.flag("-k"));
+        std::string n = hex_decode_str(ctx.flag("-i"));
+        uint32_t counter = (uint32_t)ctx.opt_int_flag("--counter", 0);
+        std::string out;
+        salsa20_crypt(ctx.input, k, n, counter, out);
+        print_result(ctx, out);
+    };
+
     map["poly1305"] = [](const Context &ctx) {
         std::string k = hex_decode_str(ctx.flag("-k"));
         std::string out;

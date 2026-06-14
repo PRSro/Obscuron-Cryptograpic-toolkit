@@ -9,57 +9,68 @@ BranchExplorer::BranchExplorer(int max_threads, int timeout_sec)
     : max_threads_(max_threads), timeout_sec_(timeout_sec) {}
 
 bool BranchExplorer::should_branch(
-    const std::vector<CipherCandidate> &candidates, double threshold)
+    const std::vector<CipherCandidate> &candidates,
+    const std::string &input,
+    double /*threshold*/)
 {
     if (candidates.size() < 2) return false;
+    if (input.size() < 20) return false;
+
+    const std::string &name = candidates[0].cipher_name;
+    static const char *non_branchable[] = {
+        "hex", "base64", "base32", "base58", "base85", "binary",
+        "octal", "large-base", "morse", "bacon", "braille", "url",
+        "high-entropy", "der-asn1", nullptr
+    };
+    for (const char **p = non_branchable; *p; p++) {
+        if (name == *p) return false;
+    }
+    if (name.find("pem-") == 0 || name.find("rsa-") == 0) return false;
+
     if (candidates[0].confidence >= 0.85) return false;
-    double gap = candidates[0].confidence - candidates[1].confidence;
-    return gap < threshold;
+
+    return true;
 }
 
-static double compute_branch_score(
+double compute_branch_score(
     const CipherCandidate &original,
     const std::vector<CipherCandidate> &sub)
 {
-    if (sub.empty()) {
-        for (auto &s : sub)
-            if (s.confidence >= 0.25) return original.confidence * 0.85;
-        return original.confidence * 0.85;
+    if (sub.empty()) return original.confidence * 0.85;
+
+    double orig_chi = score_english_combined(original.decrypted);
+    double sub_chi  = score_english_combined(sub[0].decrypted);
+    (void)orig_chi;
+
+    // HARD GATE: sub-result must not be worse than chi=60 to ever boost
+    if (sub_chi > 60.0) {
+        return std::min(original.confidence, original.confidence * 0.85);
     }
 
-    double best_sub = sub[0].confidence;
-    std::string best_decrypted = sub[0].decrypted;
+    bool sub_is_encoding = (sub[0].cipher_name == "hex" || sub[0].cipher_name == "base64"
+        || sub[0].cipher_name == "base32" || sub[0].cipher_name == "base85"
+        || sub[0].cipher_name == "base58" || sub[0].cipher_name == "binary"
+        || sub[0].cipher_name == "octal");
 
-    if (best_sub > 0.70 && score_english(best_decrypted) < 30.0)
+    if (sub[0].decrypted == original.decrypted)
+        return original.confidence * 0.80;
+
+    if (sub[0].confidence > 0.70 && sub_chi < 30.0)
         return std::min(original.confidence * 1.3, 0.96);
 
-    static const char *encoding_names[] = {
-        "hex", "base64", "base32", "binary", "octal", "base58",
-        "base85", "large-base", nullptr
-    };
-    bool sub_is_encoding = false;
-    for (const char **p = encoding_names; *p; p++) {
-        if (sub[0].cipher_name == *p) {
-            sub_is_encoding = true;
-            break;
-        }
-    }
     if (sub_is_encoding)
-        return original.confidence * 1.1;
-
-    if (best_decrypted == original.decrypted)
-        return original.confidence * 0.80;
+        return std::min(original.confidence * 1.1, 0.93);
 
     return original.confidence * 0.95;
 }
 
 std::vector<BranchResult> BranchExplorer::explore(
-    const std::string &,
+    const std::string &input,
     const std::vector<CipherCandidate> &candidates,
     int top_n)
 {
     std::vector<BranchResult> results;
-    if (!should_branch(candidates)) return results;
+    if (!should_branch(candidates, input)) return results;
 
     int num = std::min(max_threads_, (int)candidates.size());
 

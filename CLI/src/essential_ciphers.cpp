@@ -9,25 +9,47 @@ void raw_bytes_print(const std::string &a) {
 void large_encrypt(const std::string &a, std::string &out, int base) {
     out="";
     std::string temp=a;
-    for (char ch : temp) {
-        std::string part;
-        base_convert((long long)(unsigned char)ch, part, base);
-        out += part + ' ';
+    if (base <= 62) {
+        for (char ch : temp) {
+            std::string part;
+            base_convert((long long)(unsigned char)ch, part, base);
+            out += part + ' ';
+        }
+    } else {
+        for (char ch : temp) {
+            std::string part;
+            base_convert_full((long long)(unsigned char)ch, part, base);
+            out += part + ' ';
+        }
     }
 }
 
 void large_decrypt(const std::string &a, std::string &out, int base) {
     out = "";
     std::string token;
-    for (char c : a + " ") {
-        if (c == ' ') {
-            if (token.empty()) continue;
-            long long val;
-            base_deconvert(token, val, base);
-            out += (char)(unsigned char)val;
-            token = "";
-        } else {
-            token += c;
+    if (base <= 62) {
+        for (char c : a + " ") {
+            if (c == ' ') {
+                if (token.empty()) continue;
+                long long val;
+                base_deconvert(token, val, base);
+                out += (char)(unsigned char)val;
+                token = "";
+            } else {
+                token += c;
+            }
+        }
+    } else {
+        for (char c : a + " ") {
+            if (c == ' ') {
+                if (token.empty()) continue;
+                long long val;
+                base_deconvert_full(token, val, base);
+                out += (char)(unsigned char)val;
+                token = "";
+            } else {
+                token += c;
+            }
         }
     }
 }

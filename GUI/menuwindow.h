@@ -14,8 +14,6 @@ private:
     QPushButton *btnNumber;
     QPushButton *btnSettings;
 
-    void setupmenu();
-
 private slots:
     void onCipherClicked();
     void onNumberClicked();

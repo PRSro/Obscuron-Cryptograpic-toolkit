@@ -16,9 +16,22 @@ std::string from_hex(const std::string &hex);
 
 void md5_hash(const std::string &input, std::string &output);
 
+struct MD5State { uint32_t h0, h1, h2, h3; };
+MD5State md5_state_from_hash(const std::string &hash_hex);
+bool md5_hash_continue(const MD5State &state, uint64_t processed_bytes, const std::string &extra, std::string &output);
 
 void sha1_hash(const std::string &input, std::string &output);
+
+struct SHA1State { uint32_t h0, h1, h2, h3, h4; };
+SHA1State sha1_state_from_hash(const std::string &hash_hex);
+bool sha1_hash_continue(const SHA1State &state, uint64_t processed_bytes, const std::string &extra, std::string &output);
+
 void sha256_hash(const std::string &input, std::string &output);
+
+struct SHA256State { uint32_t h[8]; };
+SHA256State sha256_state_from_hash(const std::string &hash_hex);
+bool sha256_hash_continue(const SHA256State &state, uint64_t processed_bytes, const std::string &extra, std::string &output);
+
 void sha512_hash(const std::string &input, std::string &output);
 void blake2b_hash(const std::string &input, std::string &output, const std::string &key = "");
 void blake2s_hash(const std::string &input, std::string &output, const std::string &key = "");
@@ -34,9 +47,10 @@ bool argon2id_hash(const std::string &password, const std::string &salt, uint32_
 // Symmetric Ciphers
 // Mode: 0=ECB, 1=CBC, 2=CTR
 bool aes_encrypt(const std::string &plaintext, const std::string &key, const std::string &iv, int mode, std::string &ciphertext);
-bool aes_decrypt(const std::string &ciphertext, const std::string &key, const std::string &iv, int mode, std::string &plaintext);
+bool aes_decrypt(const std::string &ciphertext, const std::string &key, const std::string &iv, int mode, std::string &plaintext, bool strip_pkcs7 = true);
 
 void chacha20_crypt(const std::string &input, const std::string &key, const std::string &nonce, uint32_t counter, std::string &output);
+void salsa20_crypt(const std::string &input, const std::string &key, const std::string &nonce, uint32_t counter, std::string &output);
 void poly1305_mac(const std::string &input, const std::string &key, std::string &mac);
 
 // JWT (JSON Web Tokens)

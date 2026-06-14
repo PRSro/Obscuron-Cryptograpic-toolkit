@@ -71,7 +71,7 @@ void NumberWindow::setupUI() {
     mainLayout->addLayout(topBar);
 
     connect(backBtn, &QPushButton::clicked, this, [this]{
-        MenuWindow *m = new MenuWindow(); m->show(); this->close();
+        MenuWindow *m = new MenuWindow(); m->setAttribute(Qt::WA_DeleteOnClose); m->show(); this->close();
     });
 
     // ── Controls ──
@@ -92,7 +92,7 @@ void NumberWindow::setupUI() {
 
     baseLabel = new QLabel("Base:");
     baseSpin = new QSpinBox();
-    baseSpin->setRange(2, 62);
+    baseSpin->setRange(2, 85);
     baseSpin->setValue(16);
 
     ctrlRow->addWidget(opLabel);

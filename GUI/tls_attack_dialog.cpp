@@ -2,6 +2,7 @@
 #include "theme_manager.h"
 #include "colours.h"
 #include "modern_ciphers.h"
+#include "pcap_reader.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -99,12 +100,10 @@ void TlsAttackDialog::setupFingerprintTab(QWidget *tab) {
     lay->addWidget(m_fpIssues);
 
     connect(m_fpAnalyse, &QPushButton::clicked, this, &TlsAttackDialog::onAnalyse);
-    if (m_fpAuto) {
-        connect(m_fpInput, &QPlainTextEdit::textChanged, this, [this]() {
-            if (m_fpAuto->isChecked() && !m_fpInput->toPlainText().trimmed().isEmpty())
-                onAnalyse();
-        });
-    }
+    connect(m_fpInput, &QPlainTextEdit::textChanged, this, [this]() {
+        if (m_fpAuto->isChecked() && !m_fpInput->toPlainText().trimmed().isEmpty())
+            onAnalyse();
+    });
 }
 
 void TlsAttackDialog::setupSessionDecryptTab(QWidget *tab) {
@@ -172,7 +171,7 @@ void TlsAttackDialog::setupCertParserTab(QWidget *tab) {
     lay->addWidget(m_certTree);
 
     QHBoxLayout *btnRow = new QHBoxLayout();
-    m_certExtractRsa = new QPushButton("Extract Public Key  RSA Attack");
+    m_certExtractRsa = new QPushButton("Extract Public Key → RSA Attack");
     m_certExtractRsa->setStyleSheet("background:#aa5500; color:#fff; font-weight:bold;");
     btnRow->addWidget(m_certExtractRsa);
 
@@ -227,15 +226,178 @@ void TlsAttackDialog::onAnalyse() {
 }
 
 void TlsAttackDialog::onDecrypt() {
-    m_sdOutput->setPlainText(
-        "TLS session decryption requires pcap integration (planned)\n\n"
-        "This feature will be implemented in a future iteration with libpcap.\n"
-        "The following parameters were captured:\n"
-        "  TLS Version: " + m_sdVersion->currentText() + "\n" +
-        "  Cipher Suite: " + m_sdCipher->currentText() + "\n\n"
-        "For now, export the TLS handshake and use the Certificate Parser tab\n"
-        "to analyse the server certificate, then run RSA attacks from there."
-    );
+    std::string input = m_sdInput->toPlainText().toStdString();
+    std::string key   = m_sdKey->text().toStdString();
+    if (input.empty()) {
+        m_sdOutput->setPlainText("Provide a pcap path or hex-encoded TLS records.");
+        return;
+    }
+
+    std::vector<PcapPacket> packets;
+    std::vector<TlsRecord> records;
+    std::vector<TlsSession> sessions;
+    std::string error;
+    std::string result;
+
+    // Try as pcap file first
+    if (read_pcap(input, packets, error)) {
+        result += "[pcap] loaded " + std::to_string(packets.size()) + " packets\n";
+        if (!key.empty()) {
+            std::vector<TlsSession> keylog_sessions;
+            if (load_keylog(key, keylog_sessions, error)) {
+                result += "[keylog] loaded " + std::to_string(keylog_sessions.size()) + " sessions\n";
+                sessions = keylog_sessions;
+            }
+        }
+
+        if (!extract_tls_records(packets, records, error)) {
+            m_sdOutput->setPlainText(QString::fromStdString(result + "No TLS records found."));
+            return;
+        }
+        result += "[tls] " + std::to_string(records.size()) + " records extracted\n";
+
+        // Try to extract handshake random values
+        std::vector<TlsSession> handshake_sessions;
+        if (extract_tls_sessions(packets, handshake_sessions, error)) {
+            result += "[handshake] " + std::to_string(handshake_sessions.size()) + " sessions\n";
+            // Merge keylog master keys into handshake sessions by client_random
+            for (auto &hs : handshake_sessions) {
+                for (const auto &kl : sessions) {
+                    if (kl.client_random == hs.client_random) {
+                        hs.master_key = kl.master_key;
+                        break;
+                    }
+                }
+            }
+
+            // Map cipher_dropdown to cipher_suite value
+            int cipher_idx = m_sdCipher->currentIndex();
+            uint16_t cs = 0x002F; // default AES-128-CBC-SHA
+            switch (cipher_idx) {
+                case 0: cs = 0x002F; break; // AES-128-CBC
+                case 1: cs = 0x0035; break; // AES-256-CBC
+                case 2: cs = 0x009C; break; // AES-128-GCM
+                case 3: cs = 0x009D; break; // AES-256-GCM
+                case 4: cs = 0x009C; break; // ChaCha20 -> use AES-128-GCM fallback
+            }
+
+            bool decrypted_any = false;
+            for (auto &sess : handshake_sessions) {
+                if (sess.master_key.empty()) {
+                    result += "  [session] no master key for ClientHello " +
+                              to_hex(sess.client_random.data(), 8) + "... skipping\n";
+                    continue;
+                }
+                sess.cipher_suite = cs;
+                if (!sessions.empty() && sessions[0].cipher_suite != 0)
+                    sess.cipher_suite = sessions[0].cipher_suite;
+
+                std::string output;
+                if (tls_decrypt_application_data(records, sess, output, error)) {
+                    result += "[decrypt] " + std::to_string(output.size()) + " bytes:\n";
+                    // Show printable portion
+                    bool printable = true;
+                    for (unsigned char ch : output) {
+                        if (ch < 32 && ch != '\n' && ch != '\r' && ch != '\t') {
+                            printable = false; break;
+                        }
+                    }
+                    if (printable) result += output + "\n";
+                    else result += "(hex) " + to_hex((const unsigned char*)output.data(), output.size()) + "\n";
+                    decrypted_any = true;
+                } else {
+                    result += "  [decrypt] failed: " + error + "\n";
+                }
+            }
+            if (!decrypted_any)
+                result += "[!] No application data decrypted. Check keylog cipher suite match.\n";
+        }
+    } else {
+        // Treat input as hex-encoded TLS records directly
+        std::string raw_str = from_hex(input);
+        if (raw_str.empty() && !input.empty()) {
+            m_sdOutput->setPlainText(QString::fromStdString("Cannot read as pcap file or hex input:\n" + error));
+            return;
+        }
+        std::vector<uint8_t> raw(raw_str.begin(), raw_str.end());
+        result += "[hex] parsed " + std::to_string(raw.size()) + " bytes\n";
+        size_t off = 0;
+        while (off + 5 <= raw.size()) {
+            uint8_t ct = raw[off];
+            uint16_t ver = ((uint16_t)raw[off+1]<<8)|raw[off+2];
+            uint16_t len = ((uint16_t)raw[off+3]<<8)|raw[off+4];
+            if (off + 5 + len > raw.size()) break;
+            TlsRecord rec;
+            rec.content_type = ct; rec.version = ver;
+            rec.fragment.assign(raw.begin()+off+5, raw.begin()+off+5+len);
+            records.push_back(rec);
+            off += 5 + len;
+        }
+        result += "[tls] " + std::to_string(records.size()) + " records\n";
+        if (records.empty()) {
+            m_sdOutput->setPlainText("No valid TLS records found in hex data.");
+            return;
+        }
+
+        // Parse handshake for random values
+        for (const auto &rec : records) {
+            if (rec.content_type != 22) continue;
+            const auto &f = rec.fragment;
+            if (f.size() < 4) continue;
+            uint8_t hs_type = f[0];
+            uint32_t hs_len = ((uint32_t)f[1]<<16)|((uint32_t)f[2]<<8)|f[3];
+            if (hs_type == 1 && hs_len >= 38 && 4+38 <= f.size()) {
+                TlsSession sess;
+                sess.client_random.assign(f.begin()+6, f.begin()+38);
+                sessions.push_back(sess);
+            } else if (hs_type == 2 && hs_len >= 38 && !sessions.empty() && 4+38 <= f.size()) {
+                TlsSession &sess = sessions.back();
+                sess.server_random.assign(f.begin()+6, f.begin()+38);
+            }
+        }
+
+        // Use cipher from dropdown
+        uint16_t cs = 0x002F;
+        switch (m_sdCipher->currentIndex()) {
+            case 0: cs = 0x002F; break;
+            case 1: cs = 0x0035; break;
+            case 2: cs = 0x009C; break;
+            case 3: cs = 0x009D; break;
+        }
+        for (auto &sess : sessions) sess.cipher_suite = cs;
+
+        if (!key.empty()) {
+            // Try key as hex master key (96 hex chars)
+            if (key.size() == 96) {
+                std::string mk_str = from_hex(key);
+            std::vector<uint8_t> mk(mk_str.begin(), mk_str.end());
+            if (!mk.empty() && mk.size() == 48)
+                    for (auto &sess : sessions) sess.master_key = mk;
+            }
+        }
+
+        bool decrypted = false;
+        for (auto &sess : sessions) {
+            if (sess.master_key.empty() || sess.server_random.empty()) continue;
+            std::string output;
+            if (tls_decrypt_application_data(records, sess, output, error)) {
+                bool printable = true;
+                for (unsigned char ch : output) {
+                    if (ch < 32 && ch != '\n' && ch != '\r' && ch != '\t') {
+                        printable = false; break;
+                    }
+                }
+                result += "[decrypt] " + std::to_string(output.size()) + " bytes:\n";
+                if (printable) result += output + "\n";
+                else result += "(hex) " + to_hex((const unsigned char*)output.data(), output.size()) + "\n";
+                decrypted = true;
+            }
+        }
+        if (!decrypted)
+            result += "[!] Decryption failed. Verify master key / keylog and cipher suite selection.\n";
+    }
+
+    m_sdOutput->setPlainText(QString::fromStdString(result));
 }
 
 void TlsAttackDialog::onParseCert() {
@@ -331,7 +493,7 @@ void TlsAttackDialog::onCheckExpiry() {
         m_certCheckExpiry->setText("Cannot parse date");
         return;
     }
-    dt.setTimeZone(QTimeZone::UTC);
+    dt.setTimeZone(QTimeZone::utc());
 
     if (dt < QDateTime::currentDateTimeUtc()) {
         m_certCheckExpiry->setStyleSheet("background:#cc2222; color:#fff; font-weight:bold;");

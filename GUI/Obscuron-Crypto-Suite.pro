@@ -21,6 +21,7 @@ SOURCES += \
     advanced_crypt_dialog.cpp \
     rsa_attack_dialog.cpp \
     tls_attack_dialog.cpp \
+    settings_dialog.cpp \
     ../CLI/src/modern_ciphers.cpp \
     ../CLI/src/ntl_bridge.cpp \
     ../CLI/src/basic_ciphers.cpp \
@@ -46,6 +47,7 @@ HEADERS += \
     advanced_crypt_dialog.h \
     rsa_attack_dialog.h \
     tls_attack_dialog.h \
+    settings_dialog.h \
     ../CLI/includes/modern_ciphers.h \
     ../CLI/includes/basic.h \
     ../CLI/includes/basic_ciphers.h \

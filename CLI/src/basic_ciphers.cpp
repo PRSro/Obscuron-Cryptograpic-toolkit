@@ -2,7 +2,8 @@
 #include <stdexcept>
 
 const char padding='0';
-const std::string alphabet="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!#$%&()*+-;<=>?@^_`{|}~[].,";
+const std::string alphabet="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const std::string alphabet_full=alphabet+"!\"#$%&'()*+,-./:;<=>?@[";
 const std::string alphabet_to_morse="abcdefghijklmnopqrstuvwxyz0123456789 ";
 const std::string morse_to_alphabet[38] = {
     ".-",    "-...",  "-.-.",  "-..",   ".",     "..-.",  "--.",   "....",
@@ -105,6 +106,35 @@ void base_convert(long long b, std::string &final, int base) {
     while(d!=0) {
         int r=d%base;
         final+=alphabet.at(r);
+        d/=base;
+    }
+    std::string temp;
+    reverser(final, temp);
+    final=temp;
+    if(b<0) final.insert(0, "-");
+}
+
+void base_deconvert_full(const std::string &a, long long &b, int base) {
+    if (a.empty()) { b = 0; return; }
+    bool negative = (a[0] == '-');
+    std::string temp = negative ? a.substr(1) : a;
+    b = 0;
+    for (size_t i = 0; i < temp.size(); i++) {
+        size_t val = alphabet_full.find(temp[i]);
+        if (val == std::string::npos)
+            throw std::invalid_argument("base_deconvert_full: character not in extended alphabet");
+        b = b * base + (long long)val;
+    }
+    if (negative) b *= -1;
+}
+
+void base_convert_full(long long b, std::string &final, int base) {
+    final="";
+    if (b==0) { final="0"; return; }
+    long long d=std::abs(b);
+    while(d!=0) {
+        int r=d%base;
+        final+=alphabet_full.at(r);
         d/=base;
     }
     std::string temp;
@@ -284,7 +314,8 @@ void suggestions() {
     printf(ROW, "sniff_encoding",    "detect hex/base64/binary/text",    "(str) -> str");
     std::cout << "─────────────────────────────────────────────────────────────────────────────────────\n";
     std::cout << "│ supported bases: 2 (bin)  8 (oct)  10 (dec)  16 (hex)  36 (alphanum lower)         │\n";
-    std::cout << "│                  62 (full alphanumeric: 0-9, a-z, A-Z)                             │\n";
-    std::cout << "│ alphabet: 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ           │\n";
+    std::cout << "│                  62 (full alphanumeric)  85 (full printable ASCII)                 │\n";
+    std::cout << "│ alphabet (2-62):  0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ   │\n";
+    std::cout << "│ alphabet (63-85): + !\"#$%&'()*+,-./:;<=>?@[                                       │\n";
     std::cout << "═════════════════════════════════════════════════════════════════════════════════════\n";
 }

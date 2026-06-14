@@ -6,6 +6,7 @@
 #include "modern_ciphers.h"
 #include "advanced_crypt_dialog.h"
 #include "tls_attack_dialog.h"
+#include "settings_dialog.h"
 #include "detector.h"
 #include "basic.h"
 #include <sstream>
@@ -217,6 +218,7 @@ void MainWindow::setupUI() {
 
     connect(backBtn, &QPushButton::clicked, this, [this]{
         MenuWindow *m = new MenuWindow();
+        m->setAttribute(Qt::WA_DeleteOnClose);
         m->show();
         this->close();
     });
@@ -257,6 +259,12 @@ void MainWindow::setupUI() {
     m_themeCombo->setFixedWidth(130);
     topBar->addWidget(m_themeCombo);
     connect(m_themeCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(onThemeChanged(int)));
+
+    QPushButton *settingsBtn = new QPushButton("⚙");
+    settingsBtn->setFixedSize(30, 28);
+    settingsBtn->setToolTip("Settings");
+    topBar->addWidget(settingsBtn);
+    connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
 
     QPushButton *advancedBtn = new QPushButton("ADVANCED");
     advancedBtn->setFixedWidth(100);
@@ -1105,6 +1113,11 @@ void MainWindow::onRedo() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Themes, Presets, CTF Search Cracking
 // ─────────────────────────────────────────────────────────────────────────────
+
+void MainWindow::onOpenSettings() {
+    SettingsDialog dlg(this);
+    dlg.exec();
+}
 
 void MainWindow::onThemeChanged(int index) {
     QColor accent(74, 124, 255);

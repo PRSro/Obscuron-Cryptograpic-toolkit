@@ -94,7 +94,7 @@ static void print_list() {
         "brute-railfence", "brute-rotate", "brute-vigenere", "brute-xor",
         "caesar", "chacha20", "chain", "columnar", "custom-rot",
         "des", "des3", "detect", "enigma", "four-square",
-        "hex-xor", "hmac-sha256", "hmac-sha512", "keyboard-shift",
+        "hex", "base64", "hex-xor", "hmac-sha256", "hmac-sha512", "keyboard-shift",
         "keyword", "large", "little-endian", "lsb-embed", "lsb-extract",
         "md5", "morse", "octal", "pbkdf2", "playfair", "poly1305",
         "polybius", "proper-base", "qr", "railfence", "rc4", "rot13",
@@ -104,8 +104,12 @@ static void print_list() {
         "rsa-decrypt", "rsa-wiener", "rsa-hastad", "rsa-common-modulus",
         "rsa-factor-fermat", "rsa-factor-pollard", "rsa-parity-oracle",
         "rsa-encode", "rsa-info",
-        "ec-add", "ec-mul", "dlp-bsgs", "dlp-pohlig", "lll",
-        nullptr
+         "ec-add", "ec-mul", "dlp-bsgs", "dlp-pohlig", "lll",
+         "ecb-detect", "cbc-padding-oracle", "hash-extend",
+         "ecdsa-nonce-reuse", "dh-check", "zip-crack",
+         "shamir-reconstruct", "gf256-mul", "gf256-inv",
+         "tls-fingerprint", "parse-cert", "salsa20",
+         nullptr
     };
     for (int j = 0; names[j]; j++) std::cout << names[j] << "\n";
 }

@@ -1,8 +1,9 @@
 # Obscuron Cryptographic Suite
 
 A desktop cryptographic toolkit built in C++ with Qt, inspired by CyberChef.
-Also includes a **standalone CLI** (`ob-crypt`) with 80+ cipher operations,
-RSA attacks, elliptic curve arithmetic, DLP solvers, and lattice reduction.
+Also includes a **standalone CLI** (`ob-crypt`) with 100 cipher and attack
+operations, RSA attacks, elliptic curve arithmetic, DLP solvers, lattice
+reduction, TLS analysis, and CTF attack modules.
 
 Still in alpha, V0.3
 
@@ -23,6 +24,12 @@ Still in alpha, V0.3
 - **Elliptic curves**: Point addition, scalar multiplication
 - **Discrete log**: Baby-step giant-step, Pohlig-Hellman
 - **Lattice reduction**: LLL algorithm
+- **Attack modules**: ECB detect, CBC padding oracle, hash length extension,
+  ECDSA nonce reuse, DH parameter check, ZipCrypto known-plaintext, Shamir's
+  secret reconstruction, GF(2^8) arithmetic
+- **TLS analysis**: Certificate parsing (PEM/hex/DER), TLS handshake fingerprinting
+  with version/cipher/suite detection and risk flag assessment (DROWN, POODLE, BEAST)
+- Salsa20 stream cipher
 - Auto-detection and statistical analysis (entropy, IoC, frequency)
 - Chain multiple operations in a pipeline
 
@@ -32,7 +39,7 @@ Still in alpha, V0.3
 - Rail Fence, Columnar transposition
 - Hex XOR, Binary, Octal, URL encoding
 - ROT8000 (Unicode-aware rotation)
-- Large base conversion (base 2–62)
+- Large base conversion (base 2–85)
 - Little/Big endian encoding
 
 ---
@@ -76,6 +83,31 @@ ob-crypt rsa-common-modulus -n <n> -e1 <e1> -e2 <e2> -c1 <c1> -c2 <c2>
 
 # Parity oracle
 ob-crypt rsa-parity-oracle -n <n> -e <e> -c <c> --oracle "./parity.sh"
+```
+
+### Attack & TLS Examples
+```bash
+# ECB block-repeat detection
+ob-crypt ecb-detect --hex "aabbccddaabbccdd"
+# CBC padding oracle (external oracle script)
+ob-crypt cbc-padding-oracle -c "cipherhex" -i "ivhex" --oracle "./oracle.sh"
+# Hash length extension
+ob-crypt hash-extend --hash md5 --known-hash "5d41402abc4b2a76b9719d911017c592" --known-len 5 --append "bar"
+# ECDSA nonce reuse
+ob-crypt ecdsa-nonce-reuse --r1 "..." --s1 "..." --s2 "..." --h1 "..." --h2 "..." --n "..."
+# DH weak parameter check
+ob-crypt dh-check --g "..." --p "..."
+# ZipCrypto known-plaintext attack
+ob-crypt zip-crack --zip archive.zip --known "knownplaintext"
+# Shamir secret reconstruction
+ob-crypt shamir-reconstruct --shares "1:42,2:84" --prime "0x11b"
+# GF(2^8) arithmetic
+ob-crypt gf256-mul --a 0x53 --b 0xca
+ob-crypt gf256-inv --a 0x53
+# TLS fingerprint
+ob-crypt tls-fingerprint -f cert.pem
+# Parse X.509 certificate
+ob-crypt parse-cert -f cert.pem
 ```
 
 ### Brute Force Examples

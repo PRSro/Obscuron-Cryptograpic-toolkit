@@ -11,6 +11,8 @@ void register_bruteforce_handlers(HandlerMap &map);
 void register_bytes_handlers(HandlerMap &map);
 void register_detector_handlers(HandlerMap &map);
 void register_rsa_handlers(HandlerMap &map);
+void register_attack_handlers(HandlerMap &map);
+void register_tls_handlers(HandlerMap &map);
 void chain_handler(const HandlerMap &map, const Context &ctx);
 
 HandlerMap register_all_handlers();

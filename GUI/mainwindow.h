@@ -88,6 +88,7 @@ private slots:
 
     // Menu and settings actions
     void onThemeChanged(int index);
+    void onOpenSettings();
     void onUndo();
     void onRedo();
     
