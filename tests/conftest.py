@@ -15,3 +15,14 @@ def ob_run(*args, input_data=None):
         timeout=30,
     )
     return result.returncode, result.stdout.decode(), result.stderr.decode()
+
+
+def ob_run_bytes(*args, input_data=None):
+    """Run ob-crypt with args, return (returncode, stdout_bytes, stderr_bytes)."""
+    result = subprocess.run(
+        [OB_CRYPT] + list(args),
+        input=input_data,
+        capture_output=True,
+        timeout=30,
+    )
+    return result.returncode, result.stdout, result.stderr

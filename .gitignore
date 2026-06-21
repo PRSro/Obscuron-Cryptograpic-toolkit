@@ -74,6 +74,25 @@ CMakeLists.txt.user*
 *.dll
 *.exe
 
+# Debug binaries
+*-debug
+/CLI/ob-crypt
+
+# Backup files
+*.bak
+*.bak*
+
+# Archives
+*.zip
+
+# Ignore all markdown files except root README.md
+*.md
+!/README.md
+
+# Ignore all hidden directories except pytest cache
+.*/
+!.pytest_cache/
+
 # Directories with generated files
 .moc/
 .obj/
