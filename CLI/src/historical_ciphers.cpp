@@ -69,7 +69,7 @@ void beaufort(const std::string &a, const std::string &key, std::string &out) {
     for (char c:a) {
         if (c>='a' && c<='z') {
             int shift=key[ki%klen]-'a';
-            out+=(char)((shift-(c-'a')+26)%26+'a');
+            out+=(char)((shift-(c-'a')+26*26)%26+'a');
             ki++;
         } else if (c>='A' && c<='Z') {
             int shift=key[ki%klen]-'A';

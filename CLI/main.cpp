@@ -3,6 +3,7 @@
 #include "includes/bytes.h"
 #include <cstdio>
 #include <unistd.h>
+#include <unordered_set>
 
 std::string read_file(const std::string &path) {
     std::ifstream f(path.c_str(), std::ios::binary);
@@ -54,19 +55,23 @@ Context parse_args(int argc, char *argv[]) {
             const std::string &a = ctx.args[ai];
             if (a == "-f" || a == "-") continue;
             if (!a.empty() && a[0] == '-') {
-    if (a == "-s" || a == "-k" || a == "--steps"
-        || a == "--min-confidence" || a == "--top" || a == "--max-depth"
-        || a == "-e" || a == "-n" || a == "-c" || a == "-d"
-        || a == "-e1" || a == "-e2" || a == "-c1" || a == "-c2"
-        || a == "-p" || a == "--e" || a == "-b" || a == "--oracle"
-        || a == "--timeout" || a == "-i" || a == "--ciphertexts"
-        || a == "--moduli" || a == "--x1" || a == "--y1"
-        || a == "--x2" || a == "--y2" || a == "--a" || a == "--p"
-        || a == "--k" || a == "--x" || a == "--y" || a == "--g"
-        || a == "--h" || a == "--matrix") {
-        ai++;
-    }
-    continue;
+    static const std::unordered_set<std::string> vf = {
+        "-s","-k","--steps","--min-confidence","--top","--max-depth",
+        "-e","-n","-c","-d","-e1","-e2","-c1","-c2",
+        "-p","--e","-b","--oracle","--timeout","-i","--ciphertexts",
+        "--moduli","--x1","--y1","--x2","--y2","--a","--p",
+        "--k","--x","--y","--g","--h","--matrix",
+        "--b","--key","--text","--iv","--nonce","--aad","--tag",
+        "--password","--salt","--info","--ikm","--seed","--offset",
+        "--len","--cols","--rails","--depth","--layers","--radius"
+    };
+    size_t eq = a.find('=');
+    if (eq != std::string::npos) continue;
+    if (vf.count(a)) { ai++; continue; }
+    if (a == "--help" || a == "-h" || a == "--list" || a == "--raw"
+        || a == "--verbose" || a == "--decrypt" || a == "--hex-input"
+        || a == "--hex-output" || a == "--solve" || a == "--auto"
+        || a == "--no-branch" || a == "--debug") { continue; }
             }
             input = a;
             break;

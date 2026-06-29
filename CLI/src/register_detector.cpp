@@ -7,6 +7,7 @@
 #include "../includes/basic_ciphers.h"
 #include <sstream>
 #include <algorithm>
+#include <unordered_set>
 
 namespace {
 
@@ -69,10 +70,25 @@ void register_detector_handlers(HandlerMap &map) {
 
         if (auto_mode && top_n < 2) top_n = 2;
 
+        static const std::unordered_set<std::string> ENCODING_NAMES = {
+            "hex","base64","base32","base85","base58","binary","octal","url","large-base"
+        };
+
         auto solve_check = [&](const std::vector<CipherCandidate> &r,
                                 const std::string &input_text,
                                 int lc) -> bool {
             if (r.empty() || r[0].confidence < min_conf) return false;
+            if (ENCODING_NAMES.count(r[0].cipher_name)) {
+                if (r[0].confidence >= 0.50) return true;
+                if (r[0].confidence >= 0.15) {
+                    int alpha = 0;
+                    for (unsigned char ch : r[0].decrypted)
+                        if (std::isalpha(ch)) alpha++;
+                    double ar = r[0].decrypted.empty() ? 0 : (double)alpha / r[0].decrypted.size();
+                    if (ar > 0.2) return true;
+                }
+                return false;
+            }
             double gap = (r.size() >= 2) ? r[0].confidence - r[1].confidence : 1.0;
             double input_s = score_english_combined(input_text);
             double decoded_s = score_english_combined(r[0].decrypted);
@@ -129,7 +145,7 @@ void register_detector_handlers(HandlerMap &map) {
                 }
                 if (!steps.empty()) std::cout << " → ";
             }
-            std::cout << format_output(current, ctx.hex_output);
+            std::cout << current;
             if (!ctx.raw) std::cout << "\n";
             return;
         }
@@ -150,7 +166,7 @@ void register_detector_handlers(HandlerMap &map) {
                     }
                     std::cout << chain << " → ";
                 }
-                std::cout << format_output(results[0].decrypted, ctx.hex_output);
+                std::cout << results[0].decrypted;
                 if (!ctx.raw) std::cout << "\n";
                 return;
             }
@@ -169,10 +185,9 @@ void register_detector_handlers(HandlerMap &map) {
             }
         } else {
             double best_conf = results.empty() ? 1.0 : results[0].confidence;
+            if (best_conf <= 0.0) best_conf = 1.0;
             for (size_t j = 0; j < results.size(); j++) {
-                double display_conf = (best_conf > 0.0)
-                    ? results[j].confidence / best_conf * 100.0
-                    : 0.0;
+                double display_conf = results[j].confidence / best_conf * 100.0;
                 printf("%5.1f%% ", display_conf);
                 if (j == 0) std::cout << "[best] ";
                 else if (results[j].confidence / best_conf > 0.7) std::cout << "[likely] ";

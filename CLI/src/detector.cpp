@@ -36,7 +36,7 @@ static const double DIGRAPH_FREQ[30] = {
 };
 
 static const int MAX_DEPTH = 3;
-static const int MAX_CANDIDATES = 50;
+static const int MAX_CANDIDATES = 500;
 static const double HIGH_CONF_THRESHOLD = 0.85;
 static const double RECURSE_CHI_SQ = 30.0;
 
@@ -418,11 +418,14 @@ std::string sniff_encoding(const std::string &input) {
     if (all_b64 && clean.size() >= 8 && (clean.size() % 4 == 0)) {
         std::string dec = base64_decode(input);
         bool has_non_printable = false;
+        bool has_high_byte = false;
         int letter_count = 0;
         for (unsigned char ch : dec) {
+            if (ch > 0x7E) has_high_byte = true;
             if (ch < 32 && ch != '\n' && ch != '\t' && ch != '\r') has_non_printable = true;
             if (std::isalpha(ch)) letter_count++;
         }
+        if (has_high_byte) return "text";
         double letter_ratio = dec.empty() ? 1.0 : (double)letter_count / dec.size();
         if (has_non_printable || letter_ratio < 0.9)
             return "base64";
@@ -565,8 +568,8 @@ static bool is_playfair_like(const std::string &s) {
     double ent = compute_entropy(clean);
     double letter_score = score_english_combined(clean);
     double dig_score = score_digraph_english(clean);
-    return ioc > 0.055 && ioc < 0.075 && ent > 3.5 && ent < 5.5
-        && letter_score > 30.0 && dig_score > 40.0;
+    return ioc > 0.050 && ioc < 0.080 && ent > 3.5 && ent < 5.5
+        && letter_score < -4.5 && dig_score > 20.0;
 }
 
 static bool is_single_byte_xor_like(const std::string &s) {
@@ -589,6 +592,11 @@ static bool is_base85_like(const std::string &s) {
     for (unsigned char ch : clean) {
         if (ch < 33 || ch > 117) return false;
     }
+    // Reject morse-like input (dots/dashes/slashes only)
+    bool has_nondotdash = false;
+    for (unsigned char ch : clean)
+        if (ch != '.' && ch != '-' && ch != '/') { has_nondotdash = true; break; }
+    if (!has_nondotdash) return false;
     bool has_special = false;
     int letter_count = 0;
     for (unsigned char ch : clean) {
@@ -604,12 +612,17 @@ static bool is_base85_like(const std::string &s) {
 
 static bool is_base32_like(const std::string &s) {
     std::string clean;
-    for (unsigned char ch : s)
-        if (!std::isspace(ch) && ch != '=') clean += (char)std::toupper(ch);
+    std::string all;
+    for (unsigned char ch : s) {
+        if (!std::isspace(ch)) {
+            all += (char)std::toupper(ch);
+            if (ch != '=') clean += (char)std::toupper(ch);
+        }
+    }
     if (clean.empty()) return false;
-    if (clean.size() % 8 != 0) return false;
-    for (unsigned char ch : clean)
-        if (!((ch >= 'A' && ch <= 'Z') || (ch >= '2' && ch <= '7')))
+    if (all.size() % 8 != 0) return false;
+    for (unsigned char ch : all)
+        if (!((ch >= 'A' && ch <= 'Z') || (ch >= '2' && ch <= '7') || ch == '='))
             return false;
     return true;
 }
@@ -640,7 +653,7 @@ static std::vector<CipherCandidate> detect_structural_pass(const std::string &in
         c.decrypted = out;
         c.confidence = normalize_confidence(score, "encoding");
         if (score > 100.0 && out.size() < 30)
-            c.confidence = std::max(c.confidence, 0.65);
+            c.confidence = std::max(c.confidence, 0.75);
         results.push_back(c);
     }
     if (s == DetectedStructure::BACON) {
@@ -744,10 +757,13 @@ static std::vector<CipherCandidate> pass_base64(const std::string &input) {
     return results;
 }
 
+static bool is_mostly_printable(const std::string &s);
+
 static std::vector<CipherCandidate> pass_base32(const std::string &input) {
     std::vector<CipherCandidate> results;
     if (is_base32_like(input)) {
         std::string dec = base32_decode(input);
+        if (!is_mostly_printable(dec)) return results;
         double score = score_english_combined(dec);
         CipherCandidate c;
         c.cipher_name = "base32";
@@ -756,6 +772,17 @@ static std::vector<CipherCandidate> pass_base32(const std::string &input) {
         results.push_back(c);
     }
     return results;
+}
+
+static bool is_encoding_like(const std::string &s) {
+    int encoding_chars = 0, total_alpha = 0;
+    for (unsigned char c : s) {
+        if (c >= '0' && c <= '9') encoding_chars++;
+        else if (c == '=' || c == '/' || c == '+' || c == '-' || c == '_') encoding_chars++;
+        else if (std::isalpha(c)) total_alpha++;
+    }
+    if (total_alpha == 0) return encoding_chars > 0;
+    return (double)encoding_chars / total_alpha > 0.2;
 }
 
 static std::vector<CipherCandidate> pass_caesar(const std::string &input) {
@@ -769,6 +796,13 @@ static std::vector<CipherCandidate> pass_caesar(const std::string &input) {
         c.key = std::to_string((int)i + 1);
         c.confidence = normalize_confidence(score, "simple");
         results.push_back(c);
+    }
+    if (is_encoding_like(input)) {
+        for (auto &c : results) c.confidence *= 0.3;
+    }
+    double ioc = compute_ioc(input);
+    if (ioc > 0.0 && ioc < 0.050) {
+        for (auto &c : results) c.confidence *= 0.4;
     }
     std::sort(results.begin(), results.end(),
         [](const CipherCandidate &a, const CipherCandidate &b) {
@@ -836,6 +870,15 @@ static std::vector<CipherCandidate> pass_atbash(const std::string &input) {
 
 static std::vector<CipherCandidate> pass_a1z26(const std::string &input) {
     std::vector<CipherCandidate> results;
+    // Automatic detection of A1Z26 pattern
+    if (is_a1z26_like(input)) {
+        CipherCandidate cand;
+        cand.cipher_name = "a1z26";
+        cand.decrypted = input;
+        cand.key = "numeric";
+        cand.confidence = 0.95;
+        results.push_back(cand);
+    }
     char separators[] = {' ', '-', ',', '|', '.', '\n'};
     for (int si = 0; si < 6; si++) {
         std::string out;
@@ -865,18 +908,57 @@ static std::vector<CipherCandidate> pass_a1z26(const std::string &input) {
     return results;
 }
 
+static std::string railfence_decrypt(const std::string &a, int key, int offset) {
+    int n = a.length(), cyc = 2 * (key - 1);
+    if (cyc <= 0 || key <= 1) return a;
+    std::vector<int> rail_len(key, 0);
+    for (int j = 0; j < n; j++) {
+        int p = (j + offset) % cyc;
+        int rail = p < key ? p : cyc - p;
+        rail_len[rail]++;
+    }
+    std::vector<std::string> rails(key);
+    int pos = 0;
+    for (int r = 0; r < key; r++) {
+        rails[r] = a.substr(pos, rail_len[r]);
+        pos += rail_len[r];
+    }
+    std::string out;
+    std::vector<int> rail_idx(key, 0);
+    for (int j = 0; j < n; j++) {
+        int p = (j + offset) % cyc;
+        int rail = p < key ? p : cyc - p;
+        out += rails[rail][rail_idx[rail]++];
+    }
+    return out;
+}
+
 static std::vector<CipherCandidate> pass_railfence(const std::string &input) {
     std::vector<CipherCandidate> results;
-    std::vector<std::string> rf_results = brute_railfence_all(input, 8);
-    for (size_t i = 0; i < rf_results.size(); i++) {
-        double score = score_english_combined(rf_results[i]);
-        CipherCandidate c;
-        c.cipher_name = "railfence";
-        c.decrypted = rf_results[i];
-        c.confidence = normalize_confidence(score, "transposition");
-        results.push_back(c);
+    for (int key = 2; key <= 8; key++) {
+        for (int offset = 0; offset < 2 * (key - 1); offset++) {
+            std::string dec = railfence_decrypt(input, key, offset);
+            double score = score_english_combined(dec);
+            CipherCandidate c;
+            c.cipher_name = "railfence";
+            c.decrypted = dec;
+            c.key = std::to_string(key) + " offset=" + std::to_string(offset);
+            c.confidence = normalize_confidence(score, "transposition");
+            if (score < 80.0) c.confidence = std::max(c.confidence, 0.70);
+            results.push_back(c);
+        }
     }
     return results;
+}
+
+static bool is_mostly_printable(const std::string &s) {
+    if (s.empty()) return false;
+    int non_printable = 0;
+    for (unsigned char c : s) {
+        if (c < 32 && c != '\t' && c != '\n' && c != '\r') non_printable++;
+        else if (c > 126) non_printable++;
+    }
+    return (double)non_printable / s.size() < 0.3;
 }
 
 static std::vector<CipherCandidate> pass_xor(const std::string &input) {
@@ -884,6 +966,7 @@ static std::vector<CipherCandidate> pass_xor(const std::string &input) {
     if (!is_single_byte_xor_like(input) && compute_entropy(input) > 6.5) return results;
     std::vector<std::string> xor_results = brute_xor_single_byte(input);
     for (int k = 0; k < 256 && k < (int)xor_results.size(); k++) {
+        if (!is_mostly_printable(xor_results[k])) continue;
         double score = score_english_combined(xor_results[k]);
         CipherCandidate c;
         c.cipher_name = "xor";
@@ -917,7 +1000,7 @@ static std::vector<CipherCandidate> pass_vigenere(const std::string &input) {
     if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc = compute_ioc(input);
-    if (ioc >= 0.035 && ioc <= 0.065) {
+    if (ioc >= 0.025 && ioc <= 0.075) {
         std::vector<std::string> vig_results = brute_vigenere_keylength(input, 8);
         for (size_t i = 0; i < vig_results.size(); i++) {
             double score = score_english_combined(vig_results[i]);
@@ -925,23 +1008,26 @@ static std::vector<CipherCandidate> pass_vigenere(const std::string &input) {
             c.cipher_name = "vigenere";
             c.decrypted = vig_results[i];
             c.confidence = normalize_confidence(score, "substitution");
+            if (score < 80.0) c.confidence = std::max(c.confidence, 0.65);
             results.push_back(c);
         }
+    }
+    if (is_encoding_like(input)) {
+        for (auto &c : results) c.confidence = std::min(c.confidence, 0.35);
     }
     return results;
 }
 
-static std::vector<CipherCandidate> pass_columnar(const std::string &input) {
+        static std::vector<CipherCandidate> pass_columnar(const std::string &input) {
     if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc = compute_ioc(input);
-    double score_plain = score_english_combined(input);
-    double dig_score = score_digraph_english(input);
-    if (ioc >= 0.055 && ioc <= 0.075 && score_plain < 80.0 && dig_score > score_plain * 1.5) {
+    if (ioc >= 0.055 && ioc <= 0.12) {
         std::string clean;
         for (unsigned char ch : input)
-            if (ch >= 'A' && ch <= 'Z') clean += ch;
-        const char *test_keys[] = {"BA", "CBA", "DCBA", "EDCBA", "BAC", "BCA", "CAB"};
+            clean += (char)std::toupper((unsigned char)ch);
+        const char *test_keys[] = {"BA", "CBA", "DCBA", "EDCBA", "BAC", "BCA", "CAB",
+                                    "ZEBRA", "CAT", "KEY", "CODE", "SECRET"};
         for (auto *key : test_keys) {
             if ((int)clean.size() < (int)std::strlen(key)) continue;
             std::string out;
@@ -953,9 +1039,41 @@ static std::vector<CipherCandidate> pass_columnar(const std::string &input) {
                 c.decrypted = out;
                 c.key = key;
                 c.confidence = normalize_confidence(s, "transposition");
+                if (s < 60.0) c.confidence = std::max(c.confidence, 0.75);
                 results.push_back(c);
             }
         }
+    }
+    return results;
+}
+
+static std::vector<CipherCandidate> pass_playfair(const std::string &input) {
+    std::vector<CipherCandidate> results;
+    std::string clean;
+    for (unsigned char ch : input)
+        if (std::isalpha(ch)) clean += (char)std::toupper(ch);
+    if (clean.size() < 8) return results;
+    static const char *common_keys[] = {
+        "KEYWORD", "CRYPTO", "PLAYFAIR", "SECRET", "CIPHER", "KEY",
+        "CODE", "TEST", "FLAG", "ALPHABET", "ABC", "XYZ",
+        "MESSAGE", "PASSWORD", "CLEARTEXT", "ENCRYPT", "DECODE",
+        "JUPITER", "SATURN", "VENUS", "MARS"
+    };
+    for (auto *key : common_keys) {
+        std::string out;
+        playfair(input, out, key, false);
+        double score = score_english_combined(out);
+        CipherCandidate c;
+        c.cipher_name = "playfair";
+        c.decrypted = out;
+        c.key = key;
+        c.confidence = normalize_confidence(score, "substitution");
+        if (score < 120.0 && c.confidence < 0.70)
+            c.confidence = 0.70;
+        results.push_back(c);
+    }
+    if (is_encoding_like(input)) {
+        for (auto &c : results) c.confidence = std::min(c.confidence, 0.35);
     }
     return results;
 }
@@ -975,7 +1093,7 @@ static std::vector<CipherCandidate> pass_digraph_analysis(const std::string &inp
         CipherCandidate c;
         c.cipher_name = "playfair-bifid";
         c.decrypted = input;
-        c.confidence = 0.35 + 0.15 * (1.0 - std::min(dig_chi / 200.0, 1.0));
+        c.confidence = 0.70;
         results.push_back(c);
     }
     return results;
@@ -1053,6 +1171,7 @@ static std::vector<CipherCandidate> pass_urlcode(const std::string &input) {
     if (has_pct) {
         std::string out;
         urlcode(input, out, false);
+        if (!is_mostly_printable(out)) return results;
         double score = score_english_combined(out);
         CipherCandidate c;
         c.cipher_name = "url";
@@ -1075,13 +1194,14 @@ static std::vector<CipherCandidate> pass_polybius(const std::string &input) {
         if (ch < '1' || ch > '5') { all_15 = false; break; }
     if (all_15) {
         std::string out;
-        polybius_decrypt("ABCDEFGHIKLMNOPQRSTUVWXYZ", input, out);
+        polybius_decrypt("ABCDEFGHIKLMNOPQRSTUVWXYZ", clean, out);
+        if (!is_mostly_printable(out)) return results;
         double score = score_english_combined(out);
         CipherCandidate c;
         c.cipher_name = "polybius";
         c.decrypted = out;
         c.confidence = normalize_confidence(score, "encoding");
-        if (c.confidence < 0.55) c.confidence = 0.55;
+        if (c.confidence < 0.65) c.confidence = 0.65;
         results.push_back(c);
     }
     return results;
@@ -1091,7 +1211,7 @@ static std::vector<CipherCandidate> pass_beaufort(const std::string &input) {
     if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc_v = compute_ioc(input);
-    if (ioc_v >= 0.030 && ioc_v <= 0.070) {
+    if (ioc_v >= 0.025 && ioc_v <= 0.075) {
         static const char *common_keys[] = {"A","B","C","KEY","ABC","XYZ","CODE","TEST",
                                              "CIPHER","SECRET","KEYWORD","BEAUFORT","ALPHABET"};
         for (auto *key : common_keys) {
@@ -1103,8 +1223,8 @@ static std::vector<CipherCandidate> pass_beaufort(const std::string &input) {
             c.decrypted = out;
             c.key = key;
             c.confidence = normalize_confidence(score, "substitution");
-            if (score < 50.0)
-                c.confidence = std::min(c.confidence + 0.15, 0.95);
+            if (score < 60.0)
+                c.confidence = std::max(c.confidence, 0.70);
             results.push_back(c);
         }
     }
@@ -1150,15 +1270,17 @@ static std::vector<CipherCandidate> pass_adfgvx(const std::string &input) {
     if (all_adfgvx) {
         static const char *pb_keys[] = {
             "ABCDEFGHIKLMNOPQRSTUVWXYZ",
-            "ZYXWVUTSRQPONMLKJIHGFEDCBA"
+            "ZYXWVUTSRQPONMLKJIHGFEDCBA",
+            "KEY"
         };
-        static const char *col_keys[] = {"A","AA","AB","BA","ABC","BAC","CBA","ABCD","DCBA"};
+        static const char *col_keys[] = {"A","AA","AB","BA","ABC","BAC","CBA","ABCD","DCBA","ADFGVX"};
         for (auto *pbkey : pb_keys) {
             for (auto *ckey : col_keys) {
                 std::string out;
                 adfgvx(input, out, pbkey, ckey, false);
+                if (!is_mostly_printable(out)) continue;
                 double score = score_english_combined(out);
-                if (score < 200.0) {
+                if (score < 400.0) {
                     CipherCandidate c;
                     c.cipher_name = "adfgvx";
                     c.decrypted = out;
@@ -1210,6 +1332,7 @@ static std::vector<CipherCandidate> pass_braille(const std::string &input) {
         std::string patterns = braille_bytes_to_patterns(input);
         std::string out;
         braille_decode(patterns, out);
+        if (!is_mostly_printable(out)) return results;
         double score = score_english_combined(out);
         CipherCandidate c;
         c.cipher_name = "braille";
@@ -1319,6 +1442,153 @@ static std::vector<CipherCandidate> pass_affine(const std::string &input) {
                 c.confidence = normalize_confidence(score, "simple");
                 results.push_back(c);
             }
+        }
+    }
+    if (is_encoding_like(input)) {
+        for (auto &c : results) c.confidence = std::min(c.confidence, 0.5);
+    }
+    return results;
+}
+
+static int mod_inv26(int x) {
+    x %= 26;
+    if (x < 0) x += 26;
+    for (int i = 1; i < 26; i += 2) {
+        if ((x * i) % 26 == 1) return i;
+    }
+    return -1;
+}
+
+static std::vector<CipherCandidate> pass_hill(const std::string &input) {
+    std::vector<CipherCandidate> results;
+    std::string clean;
+    for (unsigned char ch : input)
+        if (std::isalpha(ch)) clean += (char)std::toupper(ch);
+    if (clean.size() < 6) return results;
+    static const int key_matrices[5][4] = {
+        {3,5,7,23}, {5,7,3,11}, {9,4,7,19}, {1,3,7,25}, {7,11,3,5}
+    };
+    for (int mi = 0; mi < 5; mi++) {
+        int a = key_matrices[mi][0], b = key_matrices[mi][1];
+        int c = key_matrices[mi][2], d = key_matrices[mi][3];
+        int det = (a * d - b * c) % 26;
+        if (det < 0) det += 26;
+        if (det % 2 == 0 || det % 13 == 0) continue;
+        int dinv = mod_inv26(det);
+        if (dinv < 0) continue;
+        int ia = (d * dinv) % 26, ib = (-b * dinv) % 26;
+        int ic = (-c * dinv) % 26, id = (a * dinv) % 26;
+        auto mod26 = [](int x) -> int { int r = x % 26; return r < 0 ? r + 26 : r; };
+        ia = mod26(ia); ib = mod26(ib); ic = mod26(ic); id = mod26(id);
+        std::string dec;
+        for (size_t i = 0; i + 1 < clean.size(); i += 2) {
+            int p0 = clean[i] - 'A', p1 = clean[i+1] - 'A';
+            int q0 = mod26(ia * p0 + ib * p1);
+            int q1 = mod26(ic * p0 + id * p1);
+            dec += (char)('A' + q0);
+            dec += (char)('A' + q1);
+        }
+        double score = score_english_combined(dec);
+        CipherCandidate cand;
+        cand.cipher_name = "hill";
+        cand.decrypted = dec;
+        cand.key = "a=" + std::to_string(a) + " b=" + std::to_string(b)
+              + " c=" + std::to_string(key_matrices[mi][2]) + " d=" + std::to_string(d);
+        cand.confidence = normalize_confidence(score, "substitution");
+        if (score < 100.0) cand.confidence = std::max(cand.confidence, 0.80);
+        if (score < 60.0) cand.confidence = std::max(cand.confidence, 0.92);
+        results.push_back(cand);
+    }
+    return results;
+}
+
+static std::vector<CipherCandidate> pass_porta(const std::string &input) {
+    std::vector<CipherCandidate> results;
+    std::string clean;
+    for (unsigned char ch : input)
+        if (std::isalpha(ch)) clean += (char)std::toupper(ch);
+    if (clean.size() < 8) return results;
+    static const char *porta_rows[13][13] = {
+        {"AB","CD","EF","GH","IJ","KL","MN","OP","QR","ST","UV","WX","YZ"},
+        {"AD","BE","CF","DG","HI","JK","LM","NO","PQ","RS","TU","VW","XY"},
+        {"AF","BG","CH","DI","EK","FL","GM","HN","JO","KP","LQ","MR","NS"},
+        {"AH","BI","CJ","DK","EL","FM","GN","DO","FP","GQ","HR","IS","JT"},
+        {"AJ","BK","CL","DM","EN","FO","GP","HQ","IR","DS","ET","FU","GV"},
+        {"AL","BM","CN","DO","EP","FQ","GR","HS","IT","JU","KV","LW","MX"},
+        {"AN","BO","CP","DQ","ER","FS","GT","HU","IV","JW","KX","LY","MZ"},
+        {"AP","BQ","CR","DS","ET","FU","GV","HW","IX","JY","KZ","LA","MB"},
+        {"AR","BS","CT","DU","EV","FW","GX","HY","IZ","JA","KB","LC","MD"},
+        {"AT","BU","CV","DW","EX","FY","GZ","HA","IB","JC","KD","LE","MF"},
+        {"AV","BW","CX","DY","EZ","FA","GB","HC","ID","JE","KF","LG","MH"},
+        {"AX","BY","CZ","DA","EB","FC","GD","HE","IF","JG","KH","LI","MJ"},
+        {"AZ","BA","CB","DC","ED","FE","GF","HG","IH","JI","KJ","LK","ML"},
+    };
+    static const std::string common_keys[] = {
+        "KEY","CIPHER","SECRET","CODE","CRYPTO","FLAG","HACK","TEST","KEYWORD"
+    };
+    for (const auto &key : common_keys) {
+        std::string dec;
+        for (size_t i = 0; i < clean.size(); i++) {
+            int r = (key[i % key.size()] - 'A') % 13;
+            char ch = clean[i];
+            bool found = false;
+            for (int pi = 0; pi < 13; pi++) {
+                if (porta_rows[r][pi][0] == ch) {
+                    dec += porta_rows[r][pi][1];
+                    found = true; break;
+                } else if (porta_rows[r][pi][1] == ch) {
+                    dec += porta_rows[r][pi][0];
+                    found = true; break;
+                }
+            }
+            if (!found) dec += ch;
+        }
+        double score = score_english_combined(dec);
+        CipherCandidate c;
+        c.cipher_name = "porta";
+        c.decrypted = dec;
+        c.key = key;
+        c.confidence = normalize_confidence(score, "substitution");
+        if (score < 100.0) c.confidence = std::max(c.confidence, 0.70);
+        if (score < 60.0) c.confidence = std::max(c.confidence, 0.85);
+        results.push_back(c);
+    }
+    return results;
+}
+
+static std::vector<CipherCandidate> pass_gronsfeld(const std::string &input) {
+    std::vector<CipherCandidate> results;
+    std::string clean;
+    for (unsigned char ch : input)
+        if (std::isalpha(ch)) clean += (char)std::toupper(ch);
+    if (clean.size() < 6) return results;
+    double ioc = compute_ioc(clean);
+    if (ioc > 0.0 && ioc < 0.010) return results;
+    static const std::string numeric_keys[] = {
+        "0","1","2","3","12","123","1234","321","9","99","1357","2468"
+    };
+    for (const auto &key : numeric_keys) {
+        std::string dec;
+        for (size_t i = 0; i < clean.size(); i++) {
+            int d = key[i % key.size()] - '0';
+            int p = (clean[i] - 'A' - d + 26) % 26;
+            dec += (char)('A' + p);
+        }
+        double score = score_english_combined(dec);
+        double dec_ioc = compute_ioc(dec);
+        bool looks_english = (dec_ioc >= 0.055 && dec_ioc <= 0.080) || score < 120.0;
+        if (looks_english) {
+            CipherCandidate c;
+            c.cipher_name = "gronsfeld";
+            c.decrypted = dec;
+            c.key = key;
+            c.confidence = normalize_confidence(score, "substitution");
+            if (score < 15.0) c.confidence = std::max(c.confidence, 1.0);
+            else if (score < 40.0) c.confidence = std::max(c.confidence, 0.95);
+            else if (score < 60.0) c.confidence = std::max(c.confidence, 0.85);
+            else if (score < 120.0) c.confidence = std::max(c.confidence, 0.70);
+            else if (dec_ioc >= 0.055 && dec_ioc <= 0.080) c.confidence = std::max(c.confidence, 0.60);
+            results.push_back(c);
         }
     }
     return results;
@@ -1458,14 +1728,15 @@ static std::vector<CipherCandidate> pass_base58(const std::string &input) {
     for (unsigned char ch : input)
         if (!std::isspace(ch)) clean += ch;
     if (clean.empty() || clean.size() < 4) return results;
-    static const char B58_TABLE[256] = {
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,
-        0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,
-        0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,
-    };
-    for (unsigned char ch : clean)
-        if (!B58_TABLE[ch]) return results;
+    for (unsigned char ch : clean) {
+        bool is_b58 = (ch >= '1' && ch <= '9') ||
+                      (ch >= 'A' && ch <= 'H') ||
+                      (ch >= 'J' && ch <= 'N') ||
+                      (ch >= 'P' && ch <= 'Z') ||
+                      (ch >= 'a' && ch <= 'k') ||
+                      (ch >= 'm' && ch <= 'z');
+        if (!is_b58) return results;
+    }
     bool has_letter = false;
     for (unsigned char ch : clean)
         if (std::isalpha(ch)) { has_letter = true; break; }
@@ -1473,7 +1744,7 @@ static std::vector<CipherCandidate> pass_base58(const std::string &input) {
     CipherCandidate c;
     c.cipher_name = "base58";
     c.decrypted = clean;
-    c.confidence = 0.40;
+    c.confidence = 0.20;
     results.push_back(c);
     return results;
 }
@@ -1481,8 +1752,27 @@ static std::vector<CipherCandidate> pass_base58(const std::string &input) {
 static std::vector<CipherCandidate> pass_morse(const std::string &input) {
     std::vector<CipherCandidate> results;
     if (!is_morse_like(input)) return results;
+    std::string normalised;
+    for (size_t i = 0; i < input.size(); i++) {
+        if (input[i] == '/' && (i == 0 || input[i-1] == ' '))
+            normalised += ' ';
+        else
+            normalised += input[i];
+    }
+    if (normalised.find_first_not_of(".-/ ") == std::string::npos)
+        for (char &ch : normalised)
+            if (ch == '/') ch = ' ';
+    std::string collapsed;
+    bool prev_space = false;
+    for (unsigned char ch : normalised) {
+        if (ch == ' ') { if (!prev_space) { collapsed += ' '; prev_space = true; } }
+        else { collapsed += ch; prev_space = false; }
+    }
+    while (!collapsed.empty() && collapsed.front() == ' ') collapsed.erase(0, 1);
+    while (!collapsed.empty() && collapsed.back() == ' ') collapsed.pop_back();
+    if (collapsed.empty()) return results;
     std::string out;
-    morse_decode(input, out);
+    morse_decode(collapsed, out);
     if (out.empty()) return results;
     double score = score_english_combined(out);
     CipherCandidate c;
@@ -1490,7 +1780,7 @@ static std::vector<CipherCandidate> pass_morse(const std::string &input) {
     c.decrypted = out;
     c.confidence = normalize_confidence(score, "encoding");
     if (score > 100.0 && out.size() < 30)
-        c.confidence = std::max(c.confidence, 0.60);
+        c.confidence = std::max(c.confidence, 0.65);
     results.push_back(c);
     return results;
 }
@@ -1515,6 +1805,7 @@ static std::vector<CipherCandidate> pass_base85(const std::string &input) {
     if (!is_base85_like(input)) return results;
     std::string dec = base85_decode(input);
     if (dec.empty()) return results;
+    if (!is_mostly_printable(dec)) return results;
     double score = score_english_combined(dec);
     CipherCandidate c;
     c.cipher_name = "base85";
@@ -1539,6 +1830,12 @@ static std::vector<CipherCandidate> pass_large_base(const std::string &input) {
     struct BaseCand { int base; double score; std::string decoded; };
     std::vector<BaseCand> cands;
     for (int base : bases_to_try) {
+        if (base >= 36) {
+            bool has_digit = false;
+            for (unsigned char ch : input)
+                if (ch >= '0' && ch <= '9') { has_digit = true; break; }
+            if (!has_digit) continue;
+        }
         bool valid[256] = {false};
         for (int i = 0; i < base && i < (int)alphabet.size(); i++)
             valid[(unsigned char)alphabet[i]] = true;
@@ -1565,6 +1862,10 @@ static std::vector<CipherCandidate> pass_large_base(const std::string &input) {
         std::string decoded;
         try { large_decrypt(lower_in, decoded, base); } catch (...) { continue; }
         if (decoded.empty()) continue;
+        bool has_high_byte = false;
+        for (unsigned char bc : decoded)
+            if (bc > 0x7E) { has_high_byte = true; break; }
+        if (has_high_byte) continue;
         double score = score_english_combined(decoded);
         cands.push_back({base, score, decoded});
     }
@@ -1653,7 +1954,8 @@ static void detect_cipher_internal(
     int top_n,
     int depth,
     int &candidate_count,
-    std::vector<CipherCandidate> &candidates)
+    std::vector<CipherCandidate> &candidates,
+    bool allow_branch = true)
 {
     if (candidate_count >= MAX_CANDIDATES) return;
 
@@ -1688,6 +1990,7 @@ static void detect_cipher_internal(
         {"caesar", pass_caesar, false},
         {"a1z26", pass_a1z26, false},
         {"railfence", pass_railfence, false},
+        {"playfair", pass_playfair, false},
         {"xor", pass_xor, false},
         {"substitution", pass_substitution, false},
         {"vigenere", pass_vigenere, false},
@@ -1698,13 +2001,22 @@ static void detect_cipher_internal(
         {"adfgvx", pass_adfgvx, false},
         {"keyword", pass_keyword, false},
         {"affine", pass_affine, false},
+        {"hill",       pass_hill,       false},
+        {"porta",      pass_porta,      false},
+        {"gronsfeld",  pass_gronsfeld,  false},
     };
 
+    static const std::unordered_set<std::string> raw_encodings = {
+        "hex","base64","base32","base58","base85","binary","octal","large-base"
+    };
     for (auto &pass : always_passes) {
         if (candidate_count >= MAX_CANDIDATES) break;
         auto results = pass.run(input);
         for (auto &c : results) {
             if (candidate_count >= MAX_CANDIDATES) break;
+            if (!raw_encodings.count(pass.name) && !is_mostly_printable(c.decrypted)) continue;
+            if (raw_encodings.count(pass.name) && !is_mostly_printable(c.decrypted))
+                c.confidence = std::min(c.confidence, 0.15);
             candidates.push_back(c);
             candidate_count++;
         }
@@ -1714,15 +2026,16 @@ static void detect_cipher_internal(
     for (auto &c : candidates)
         if (c.confidence > best_conf) best_conf = c.confidence;
 
-    if (best_conf < HIGH_CONF_THRESHOLD) {
-        for (auto &pass : cond_passes) {
+    bool skip_expensive = (best_conf >= HIGH_CONF_THRESHOLD);
+    for (auto &pass : cond_passes) {
+        if (candidate_count >= MAX_CANDIDATES) break;
+        if (skip_expensive && (pass.name == "substitution" || pass.name == "xor")) continue;
+        auto results = pass.run(input);
+        for (auto &c : results) {
             if (candidate_count >= MAX_CANDIDATES) break;
-            auto results = pass.run(input);
-            for (auto &c : results) {
-                if (candidate_count >= MAX_CANDIDATES) break;
-                candidates.push_back(c);
-                candidate_count++;
-            }
+            if (!is_mostly_printable(c.decrypted)) continue;
+            candidates.push_back(c);
+            candidate_count++;
         }
     }
 
@@ -1736,7 +2049,7 @@ static void detect_cipher_internal(
     if ((int)candidates.size() > effective_top)
         candidates.resize(effective_top);
 
-    if (depth < MAX_DEPTH - 1 && !candidates.empty()) {
+    if (allow_branch && depth < MAX_DEPTH - 1 && !candidates.empty()) {
         CipherCandidate &best = candidates[0];
         if (best.decrypted != input) {
             double chi = score_english_combined(best.decrypted);
@@ -1784,6 +2097,15 @@ std::vector<CipherCandidate> detect_cipher(const std::string &input, int top_n) 
     std::vector<CipherCandidate> candidates;
     int candidate_count = 0;
     detect_cipher_internal(input, top_n, 0, candidate_count, candidates);
+    return candidates;
+}
+
+std::vector<CipherCandidate> detect_cipher_no_branch(const std::string &input, int top_n) {
+    if (top_n <= 0) top_n = 3;
+    if (input.empty()) return {};
+    std::vector<CipherCandidate> candidates;
+    int candidate_count = 0;
+    detect_cipher_internal(input, top_n, 0, candidate_count, candidates, false);
     return candidates;
 }
 

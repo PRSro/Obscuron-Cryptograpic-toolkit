@@ -78,7 +78,7 @@ std::vector<BranchResult> BranchExplorer::explore(
     for (int i = 0; i < num; i++) {
         std::string decoded = candidates[i].decrypted;
         futures.push_back(std::async(std::launch::async, [decoded, top_n]() {
-            return detect_cipher(decoded, top_n);
+            return detect_cipher_no_branch(decoded, top_n);
         }));
     }
 
