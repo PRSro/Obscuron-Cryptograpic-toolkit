@@ -88,6 +88,7 @@ CMakeLists.txt.user*
 # Ignore all markdown files except root README.md
 *.md
 !/README.md
+NEXTPLAN.md
 
 # Ignore all hidden directories except pytest cache
 .*/

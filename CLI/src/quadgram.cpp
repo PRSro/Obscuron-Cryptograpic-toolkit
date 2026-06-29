@@ -4,6 +4,7 @@
 #include <cstring>
 #include <algorithm>
 #include <stdexcept>
+#include <iostream>
 
 static float scores[26][26][26][26];
 static bool loaded = false;
@@ -59,13 +60,19 @@ void quadgram_load(const std::string &path) {
     }
     fclose(f);
     loaded = true;
+    if (getenv("DETECT_DEBUG"))
+        std::cerr << "debug: quadgram loaded from '" << found << "' (" << (int)total << " total)\n";
 }
 
 static void ensure_loaded() {
     if (!loaded) {
         for (auto *p : {"./english_quadgrams.txt", "../english_quadgrams.txt", "CLI/english_quadgrams.txt"}) {
             try { quadgram_load(p); return; }
-            catch (...) { continue; }
+            catch (...) {
+                if (getenv("DETECT_DEBUG"))
+                    std::cerr << "debug: quadgram failed to load '" << p << "'\n";
+                continue;
+            }
         }
     }
 }

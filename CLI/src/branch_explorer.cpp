@@ -95,7 +95,8 @@ std::vector<BranchResult> BranchExplorer::explore(
             br.sub_candidates = futures[i].get();
             for (auto &sub : br.sub_candidates) {
                 sub.was_branched = true;
-                sub.confidence = compute_branch_score(candidates[i], br.sub_candidates);
+                std::vector<CipherCandidate> single = {sub};
+                sub.confidence = compute_branch_score(candidates[i], single);
             }
         }
         results.push_back(br);

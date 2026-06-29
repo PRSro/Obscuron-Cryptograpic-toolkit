@@ -305,7 +305,7 @@ void build_bifid_grid(const std::string rows[5], char grid[6][6], int row_of[256
 
 void bifid_encrypt(const std::string &msg, std::string &out, char grid[6][6], int row_of[256], int col_of[256]) {
     int n = msg.size();
-    int flat[20001];
+    std::vector<int> flat(2*n);
     for (int i = 0; i < n; i++) flat[i]     = row_of[(int)msg[i]];
     for (int i = 0; i < n; i++) flat[n + i] = col_of[(int)msg[i]];
     out = "";
@@ -315,7 +315,7 @@ void bifid_encrypt(const std::string &msg, std::string &out, char grid[6][6], in
 
 void bifid_decrypt(const std::string &msg, std::string &out, char grid[6][6], int row_of[256], int col_of[256]) {
     int n = msg.size();
-    int flat[20001];
+    std::vector<int> flat(2*n);
     for (int i = 0; i < n; i++) {
         flat[2*i]     = row_of[(int)msg[i]];
         flat[2*i + 1] = col_of[(int)msg[i]];

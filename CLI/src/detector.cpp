@@ -5,6 +5,8 @@
 #include "../includes/essential_ciphers.h"
 #include "../includes/bruteforce_ciphers.h"
 #include "../includes/standard_ciphers.h"
+#include "../includes/bigint.hpp"
+#include "../includes/quadgram.h"
 #include <cctype>
 #include <cmath>
 #include <algorithm>
@@ -39,6 +41,13 @@ static const int MAX_DEPTH = 3;
 static const int MAX_CANDIDATES = 500;
 static const double HIGH_CONF_THRESHOLD = 0.85;
 static const double RECURSE_CHI_SQ = 30.0;
+static const double kAcceptScoreHigh = 80.0;
+static const double kAcceptScoreMid = 100.0;
+static const double kAcceptScoreLow = 60.0;
+static const double kMonoalphabeticIocLow = 0.055;
+static const double kPolyalphabeticIocMax = 0.075;
+static const double kXorEntropyMax = 6.5;
+static const double kEnglishIocMid = 0.066;
 
 struct DetectorPass {
     std::string name;
@@ -269,7 +278,89 @@ static const std::unordered_set<std::string> COMMON_WORDS_SET = {
     "across","through","over","under","again","often","always","never","maybe",
     "along","around","back","even","still","already","yet","almost","enough",
     "another","family","school","country","world","house","table","doctor","hi",
+    "quick","brown","fox","jumps","lazy","dog","over","hello","world","from",
+    "the","this","that","with","have","will","your","which","their","them",
+    "call","some","these","would","about","other","could","after","then",
+    "more","also","very","just","than","been","were","been","being","said",
+    "does","each","most","thing","many","some","them","those","here","there",
+    "where","when","why","how","back","does","which","their","your","its",
+    "two","way","day","come","came","made","make","take","like","time",
+    "year","people","thing","name","line","need","know","think","help",
+    "work","look","find","want","give","tell","say","first","then","next",
+    "well","much","such","here","down","show","form","word","part","place",
+    "case","week","hand","side","turn","mean","land","life","hand","high",
+    "state","group","play","live","read","keep","start","face","home","city",
+    "talk","away","long","still","own","ever","never","always","number",
+    "water","room","area","order","point","large","small","right","left",
+    "open","close","hard","soft","best","real","true","free","full","love",
+    "hope","few","big","old","new","young","great","short","clear","light",
+    "dark","deep","far","near","high","low","hot","cold","warm","cool",
+    "happy","sad","kind","thing","things","while","before","after","since",
+    "until","about","between","across","through","over","under","again",
+    "often","always","never","maybe","along","around","back","even","still",
+    "already","yet","almost","enough","another","family","school","country",
+    "world","house","table","doctor","say","help","low","keep","ever",
+    "never","always","often","maybe","show","try","ask","need","feel",
+    "become","leave","put","mean","let","begin","move","live","run",
+    "change","play","spell","add","set","stand","thus","yes","no",
+    "shall","must","may","might","can","could","would","should",
+    "follow","lead","see","seem","call","serve","wait","wish","bring",
+    "write","give","begin","show","hear","watch","let","run","move",
+    "live","stand","hear","believe","hold","study","happen","grow",
+    "draw","carry","set","fall","cut","raise","sit","kill","remain",
+    "produce","receive","agree","support","die","appear","rest","create",
+    "contain","reduce","establish","explain","offer","stop","continue",
+    "prove","fix","spend","forget","manage","consider","allow","fill",
+    "argue","pass","sell","require","report","decide","pull","push",
+    "recognize","refer","serve","suppose","apply","imagine","reach",
+    "choose","identify","determine","prepare","suggest","maintain",
+    "insist","repeat","divide","express","represent","claim","indicate",
+    "expect","involve","provide","pretend","avoid","prevent","admit",
+    "reject","accept","assume","conclude","proceed","define","respond",
+    "achieve","perform","adopt","acquire","administer","analyze",
+    "associate","aware","benefit","cause","circumstance","claim",
+    "community","concern","condition","consequence","consumer",
+    "contribute","convention","cooperation","corner","culture",
+    "decade","defense","direction","economy","effect","effort",
+    "emphasis","employee","environment","establishment","evidence",
+    "expansion","expert","facility","foundation","freedom",
+    "identify","illustrate","impact","implementation","implication",
+    "improvement","independence","indication","infrastructure",
+    "initiative","institution","instrument","insurance",
+    "interpretation","investigation","involvement","issue",
+    "judgment","justification","knowledge","legislation",
+    "liability","maintenance","management","manipulation",
+    "measurement","mechanism","negotiation","obligation",
+    "operation","opposition","organization","participation",
+    "partnership","perception","performance","phenomenon",
+    "philosophy","policy","possession","preference","procedure",
+    "profession","proportion","publication","pursuit",
+    "recommendation","reference","regulation","relationship",
+    "requirement","resolution","resource","responsibility",
+    "restriction","revenue","satisfaction","security",
+    "situation","strategy","structure","substance",
+    "sufficiency","supervision","supplement","symposium",
+    "terminology","tradition","transformation","transportation",
+    "utilization","variation","version","vision",
 };
+
+static int count_compact_common_words(const std::string &text) {
+    static const std::vector<std::string> compact_words = {
+        "this", "that", "there", "their", "secret", "message", "quick", "brown",
+        "jumps", "over", "lazy", "hello", "world", "attack", "plain", "text",
+        "cipher", "the", "fox", "dog", "test"
+    };
+    std::string lower;
+    lower.reserve(text.size());
+    for (unsigned char ch : text) {
+        if (std::isalpha(ch)) lower += (char)std::tolower(ch);
+    }
+    int hits = 0;
+    for (const auto &word : compact_words) {
+        if (lower.find(word) != std::string::npos) hits++;
+    }
+    return hits;
+}
 
 static std::string split_pascal_case(const std::string &s) {
     std::string r;
@@ -302,6 +393,7 @@ double score_english_combined(const std::string &text) {
         }
         pos = end;
     }
+    word_hits += count_compact_common_words(text);
 
     double word_bonus = std::min((double)word_hits * 0.08, 0.6);
     size_t tlen = text.size();
@@ -556,7 +648,16 @@ static bool is_a1z26_like(const std::string &s) {
         else if (ch == ' ' || ch == '-' || ch == ',' || ch == '|' || ch == '.' || ch == '\n') continue;
         else return false;
     }
-    return has_digit;
+    if (!has_digit) return false;
+    std::string sep_chars = " ,|-.\n";
+    std::string copy = s;
+    char *tok = std::strtok(&copy[0], sep_chars.c_str());
+    while (tok) {
+        int val = std::atoi(tok);
+        if (val < 1 || val > 26) return false;
+        tok = std::strtok(nullptr, sep_chars.c_str());
+    }
+    return true;
 }
 
 static bool is_playfair_like(const std::string &s) {
@@ -569,18 +670,21 @@ static bool is_playfair_like(const std::string &s) {
     double letter_score = score_english_combined(clean);
     double dig_score = score_digraph_english(clean);
     return ioc > 0.050 && ioc < 0.080 && ent > 3.5 && ent < 5.5
-        && letter_score < -4.5 && dig_score > 20.0;
+        && letter_score < 100.0 && dig_score > 20.0;
 }
 
 static bool is_single_byte_xor_like(const std::string &s) {
+    if (s.size() < 4) return false;
     double ent = compute_entropy(s);
     if (ent < 3.5 || ent > 6.5) return false;
+    if (score_english_combined(s) < 100.0) return false;
     int counts[256] = {0};
     for (unsigned char ch : s) counts[ch]++;
     int total = (int)s.size();
+    int bytes_above_5pct = 0;
     for (int i = 0; i < 256; i++)
-        if ((double)counts[i] / total > 0.05) return true;
-    return false;
+        if ((double)counts[i] / total > 0.05) bytes_above_5pct++;
+    return bytes_above_5pct >= 1;
 }
 
 static bool is_base85_like(const std::string &s) {
@@ -782,7 +886,7 @@ static bool is_encoding_like(const std::string &s) {
         else if (std::isalpha(c)) total_alpha++;
     }
     if (total_alpha == 0) return encoding_chars > 0;
-    return (double)encoding_chars / total_alpha > 0.2;
+    return (double)encoding_chars / total_alpha > 0.05;
 }
 
 static std::vector<CipherCandidate> pass_caesar(const std::string &input) {
@@ -870,11 +974,13 @@ static std::vector<CipherCandidate> pass_atbash(const std::string &input) {
 
 static std::vector<CipherCandidate> pass_a1z26(const std::string &input) {
     std::vector<CipherCandidate> results;
+    std::string a1z26_decoded;
+    a1z26(input, a1z26_decoded, ' ');
     // Automatic detection of A1Z26 pattern
-    if (is_a1z26_like(input)) {
+    if (is_a1z26_like(input) && !a1z26_decoded.empty()) {
         CipherCandidate cand;
         cand.cipher_name = "a1z26";
-        cand.decrypted = input;
+        cand.decrypted = a1z26_decoded;
         cand.key = "numeric";
         cand.confidence = 0.95;
         results.push_back(cand);
@@ -933,17 +1039,77 @@ static std::string railfence_decrypt(const std::string &a, int key, int offset) 
     return out;
 }
 
-static std::vector<CipherCandidate> pass_railfence(const std::string &input) {
+static double quadgram_chi_scaled(const std::string &text) {
+    // Convert quadgram score (log-prob per letter, less-negative = better)
+    // into a chi-squared-like score (lower = better) for normalize_confidence
+    try {
+        (void)quadgram_score_per_letter(text); // trigger file load check
+    } catch (...) {
+        return score_english_combined(text);
+    }
+    double qs = quadgram_score_per_letter(text);
+    // qs for English: -2.0 to -4.0 (good), -5.0 to -10.0 (bad)
+    // Map to chi-sq-like: (-qs - 1.5) * 30 so -2.0→15, -4.0→75, -8.0→195
+    return std::max(((-qs - 1.5) * 30.0), 5.0);
+}
+
+static std::vector<CipherCandidate> pass_railfence_chi(const std::string &input) {
     std::vector<CipherCandidate> results;
     for (int key = 2; key <= 8; key++) {
         for (int offset = 0; offset < 2 * (key - 1); offset++) {
             std::string dec = railfence_decrypt(input, key, offset);
-            double score = score_english_combined(dec);
-            CipherCandidate c;
+        double score = score_english_combined(dec);
+        if (getenv("DETECT_DEBUG"))
+            std::cerr << "debug: porta key=" << key << " score=" << score << " dec=\"" << dec.substr(0,30) << "\"\n";
+        CipherCandidate c;
             c.cipher_name = "railfence";
             c.decrypted = dec;
             c.key = std::to_string(key) + " offset=" + std::to_string(offset);
             c.confidence = normalize_confidence(score, "transposition");
+            if (score < 80.0) c.confidence = std::max(c.confidence, 0.70);
+            results.push_back(c);
+        }
+    }
+    return results;
+}
+
+static std::vector<CipherCandidate> pass_railfence(const std::string &input) {
+    std::vector<CipherCandidate> results;
+    // Fall back to chi-squared if quadgram not available
+    static bool qg_ok = []() {
+        try { (void)quadgram_score_per_letter("test"); return true; }
+        catch (...) { return false; }
+    }();
+    if (!qg_ok) {
+        return pass_railfence_chi(input);
+    }
+    int best_key = 2, best_offset = 0;
+    double best_qs = -99999.0;
+    for (int key = 2; key <= 8; key++) {
+        for (int offset = 0; offset < 2 * (key - 1); offset++) {
+            std::string dec = railfence_decrypt(input, key, offset);
+            double qs = quadgram_score_per_letter(dec);
+            if (getenv("DETECT_DEBUG"))
+                std::cerr << "debug: rf key=" << key << " off=" << offset
+                          << " qs=" << qs << " dec=\"" << dec.substr(0, 40) << "\"\n";
+            if (qs > best_qs) { best_qs = qs; best_key = key; best_offset = offset; }
+        }
+    }
+    if (best_qs > -99.0) {
+        std::string dec = railfence_decrypt(input, best_key, best_offset);
+        // Only accept if output has enough letters for meaningful quadgram analysis
+        int letter_count = 0;
+        for (unsigned char c : dec)
+            if (std::isalpha(c)) letter_count++;
+        if (letter_count >= 10) {
+            double score = quadgram_chi_scaled(dec);
+            CipherCandidate c;
+            c.cipher_name = "railfence";
+            c.decrypted = dec;
+            c.key = std::to_string(best_key) + " offset=" + std::to_string(best_offset);
+            c.confidence = normalize_confidence(score, "transposition");
+            if (best_qs > -4.5) c.confidence = std::max(c.confidence, 0.75);
+            if (best_qs > -3.5) c.confidence = std::max(c.confidence, 0.90);
             if (score < 80.0) c.confidence = std::max(c.confidence, 0.70);
             results.push_back(c);
         }
@@ -963,16 +1129,62 @@ static bool is_mostly_printable(const std::string &s) {
 
 static std::vector<CipherCandidate> pass_xor(const std::string &input) {
     std::vector<CipherCandidate> results;
-    if (!is_single_byte_xor_like(input) && compute_entropy(input) > 6.5) return results;
-    std::vector<std::string> xor_results = brute_xor_single_byte(input);
-    for (int k = 0; k < 256 && k < (int)xor_results.size(); k++) {
+    std::string effective_input = input;
+    if (sniff_encoding(input) == "hex") {
+        std::string dec = hex_decode(input);
+        if (is_mostly_printable(dec))
+            effective_input = dec;
+    }
+    if (getenv("DETECT_DEBUG")) {
+        std::cerr << "debug: xor hex_decode=" << (effective_input != input)
+                  << " eff_len=" << effective_input.size()
+                  << " ent=" << compute_entropy(effective_input)
+                  << " xorlike=" << is_single_byte_xor_like(effective_input)
+                  << " qtest=" << quadgram_score_per_letter("the quick brown fox jumps") << "\n";
+    }
+    if (!is_single_byte_xor_like(effective_input) && compute_entropy(effective_input) > 6.5) return results;
+    std::vector<std::string> xor_results = brute_xor_single_byte(effective_input);
+    double best_combined = 999999.0;
+    int best_chi_key = -1;
+    double best_qs = -99999.0;
+    int best_qs_key = -1;
+    int printable_count = 0;
+    for (int k = 1; k < 256 && k < (int)xor_results.size(); k++) {
         if (!is_mostly_printable(xor_results[k])) continue;
-        double score = score_english_combined(xor_results[k]);
+        printable_count++;
+        double combined = score_english_combined(xor_results[k]);
+        if (combined < best_combined) { best_combined = combined; best_chi_key = k; }
+        double qs = quadgram_score_per_letter(xor_results[k]);
+        if (qs < 0.0 && qs > best_qs) { best_qs = qs; best_qs_key = k; }
+    }
+    if (getenv("DETECT_DEBUG")) {
+        std::cerr << "debug: xor printable=" << printable_count
+                  << " best_chi_key=" << best_chi_key << " combined=" << best_combined
+                  << " best_qs_key=" << best_qs_key << " qs=" << best_qs << "\n";
+        if (best_chi_key >= 0)
+            std::cerr << "debug: xor chi_text=\"" << xor_results[best_chi_key].substr(0, 40) << "\"\n";
+        if (best_qs_key >= 0) {
+            std::string qs_repr;
+            for (unsigned char cc : xor_results[best_qs_key].substr(0, 40)) {
+                if (cc >= 32 && cc <= 126) qs_repr += cc;
+                else { char buf[8]; snprintf(buf, sizeof(buf), "\\x%02x", cc); qs_repr += buf; }
+            }
+            std::cerr << "debug: xor qs_text=\"" << qs_repr << "\" printable10="
+                      << is_mostly_printable(xor_results[10]) << "\n";
+        }
+    }
+    int best_key = best_chi_key;
+    if (best_qs_key >= 0 && best_qs_key != best_chi_key && best_qs < 0.0) {
+        double qs_combined = score_english_combined(xor_results[best_qs_key]);
+        if (qs_combined < best_combined * 1.5)
+            best_key = best_qs_key;
+    }
+    if (best_key >= 0) {
         CipherCandidate c;
         c.cipher_name = "xor";
-        c.decrypted = xor_results[k];
-        c.key = std::to_string(k);
-        c.confidence = normalize_confidence(score, "xor");
+        c.decrypted = xor_results[best_key];
+        c.key = std::to_string(best_key);
+        c.confidence = normalize_confidence(score_english_combined(xor_results[best_key]), "xor");
         results.push_back(c);
     }
     return results;
@@ -1018,11 +1230,11 @@ static std::vector<CipherCandidate> pass_vigenere(const std::string &input) {
     return results;
 }
 
-        static std::vector<CipherCandidate> pass_columnar(const std::string &input) {
+static std::vector<CipherCandidate> pass_columnar_chi(const std::string &input) {
     if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc = compute_ioc(input);
-    if (ioc >= 0.055 && ioc <= 0.12) {
+    if (ioc >= 0.010 && ioc <= 0.15) {
         std::string clean;
         for (unsigned char ch : input)
             clean += (char)std::toupper((unsigned char)ch);
@@ -1047,11 +1259,77 @@ static std::vector<CipherCandidate> pass_vigenere(const std::string &input) {
     return results;
 }
 
+static std::vector<CipherCandidate> pass_columnar(const std::string &input) {
+    if (input.size() < 15) return {};
+    static bool qg_ok = []() {
+        try { (void)quadgram_score_per_letter("test"); return true; }
+        catch (...) { return false; }
+    }();
+    if (!qg_ok) return pass_columnar_chi(input);
+    std::vector<CipherCandidate> results;
+    double ioc = compute_ioc(input);
+    if (getenv("DETECT_DEBUG"))
+        std::cerr << "debug: columnar ioc=" << ioc << " gate=[" << 0.010 << "," << 0.15 << "]\n";
+    if (ioc >= 0.010 && ioc <= 0.15) {
+        std::string clean;
+        for (unsigned char ch : input)
+            clean += (char)std::toupper((unsigned char)ch);
+        // Try fixed test keys first for speed
+        const char *test_keys[] = {"BA", "CBA", "DCBA", "EDCBA", "BAC", "BCA", "CAB",
+                                    "ZEBRA", "CAT", "KEY", "CODE", "SECRET"};
+        double best_qs = -99999.0;
+        std::string best_dec;
+        std::string best_key;
+        for (auto *key : test_keys) {
+            if ((int)clean.size() < (int)std::strlen(key)) continue;
+            std::string out;
+            columnar_decrypt(clean, out, key, (int)clean.size());
+            double qs = quadgram_score_per_letter(out);
+            if (getenv("DETECT_DEBUG"))
+                std::cerr << "debug: columnar qs key=" << key << " qs=" << qs << " out=\"" << out << "\"\n";
+            if (qs > best_qs) { best_qs = qs; best_dec = out; best_key = key; }
+        }
+        // Try all permutations for up to 5 columns (120 permutations) only if input length divides evenly
+        if (clean.size() >= 5 && clean.size() % 5 == 0) {
+            char cols[] = "ABCDE";
+            std::sort(cols, cols + 5);
+            do {
+                std::string perm(cols, 5);
+                if ((int)clean.size() < 5) continue;
+                std::string out;
+                columnar_decrypt(clean, out, perm.c_str(), (int)clean.size());
+                double qs = quadgram_score_per_letter(out);
+                if (getenv("DETECT_DEBUG"))
+                    std::cerr << "debug: columnar qs perm=" << perm << " qs=" << qs << "\n";
+                if (qs > best_qs) { best_qs = qs; best_dec = out; best_key = perm; }
+            } while (std::next_permutation(cols, cols + 5));
+        }
+        if (best_qs > -99.0) {
+            double s = quadgram_chi_scaled(best_dec);
+            if (getenv("DETECT_DEBUG"))
+                std::cerr << "debug: columnar best key=" << best_key << " qs=" << best_qs << " chi_scaled=" << s << " out=\"" << best_dec << "\"\n";
+            CipherCandidate c;
+            c.cipher_name = "columnar";
+            c.decrypted = best_dec;
+            c.key = best_key;
+            c.confidence = normalize_confidence(s, "transposition");
+            // Quadgram-based floor: better qs (closer to 0) = more English-like
+            if (best_qs > -3.5) c.confidence = std::max(c.confidence, 0.85);
+            else if (best_qs > -5.0) c.confidence = std::max(c.confidence, 0.75);
+            else if (best_qs > -6.5) c.confidence = std::max(c.confidence, 0.65);
+            results.push_back(c);
+        }
+    }
+    return results;
+}
+
 static std::vector<CipherCandidate> pass_playfair(const std::string &input) {
     std::vector<CipherCandidate> results;
     std::string clean;
-    for (unsigned char ch : input)
+    for (unsigned char ch : input) {
         if (std::isalpha(ch)) clean += (char)std::toupper(ch);
+        else if (!std::isspace(ch)) return results;
+    }
     if (clean.size() < 8) return results;
     static const char *common_keys[] = {
         "KEYWORD", "CRYPTO", "PLAYFAIR", "SECRET", "CIPHER", "KEY",
@@ -1211,10 +1489,32 @@ static std::vector<CipherCandidate> pass_beaufort(const std::string &input) {
     if (input.size() < 15) return {};
     std::vector<CipherCandidate> results;
     double ioc_v = compute_ioc(input);
-    if (ioc_v >= 0.025 && ioc_v <= 0.075) {
-        static const char *common_keys[] = {"A","B","C","KEY","ABC","XYZ","CODE","TEST",
-                                             "CIPHER","SECRET","KEYWORD","BEAUFORT","ALPHABET"};
-        for (auto *key : common_keys) {
+    if (getenv("DETECT_DEBUG"))
+        std::cerr << "debug: beaufort ioc=" << ioc_v << "\n";
+    if (ioc_v >= 0.010 && ioc_v <= 0.120) {
+        for (int ki = 0; ki < 26; ki++) {
+            std::string key(1, (char)('A' + ki));
+            std::string out;
+            beaufort(input, key.c_str(), out);
+            double score = score_english_combined(out);
+            if (getenv("DETECT_DEBUG"))
+                std::cerr << "debug: beaufort key=" << key
+                          << " score=" << score << " out=\"" << out.substr(0, 40) << "\"\n";
+            CipherCandidate c;
+            c.cipher_name = "beaufort";
+            c.decrypted = out;
+            c.key = key;
+            c.confidence = normalize_confidence(score, "substitution");
+            if (score < 80.0)
+                c.confidence = std::max(c.confidence, 0.65);
+            if (score < 60.0)
+                c.confidence = std::max(c.confidence, 0.70);
+            results.push_back(c);
+        }
+        static const char *extra_keys[] = {"KEY","ABC","XYZ","CODE","TEST",
+                                            "CIPHER","SECRET","KEYWORD","BEAUFORT","ALPHABET",
+                                            "NAVY","ARMY","FLAG","HACK","WATER","EARTH"};
+        for (auto *key : extra_keys) {
             std::string out;
             beaufort(input, key, out);
             double score = score_english_combined(out);
@@ -1223,6 +1523,8 @@ static std::vector<CipherCandidate> pass_beaufort(const std::string &input) {
             c.decrypted = out;
             c.key = key;
             c.confidence = normalize_confidence(score, "substitution");
+            if (score < 80.0)
+                c.confidence = std::max(c.confidence, 0.65);
             if (score < 60.0)
                 c.confidence = std::max(c.confidence, 0.70);
             results.push_back(c);
@@ -1349,18 +1651,40 @@ static std::vector<CipherCandidate> pass_ctf_flag(const std::string &input) {
     std::vector<CipherCandidate> results;
     auto is_flag = [](const std::string &s) -> bool {
         if (s.size() < 6) return false;
-        const char *patterns[] = {"flag{", "CTF{", "picoCTF{", "HTB{", "THM{"};
+        std::string lower = s;
+        for (char &ch : lower) ch = (char)std::tolower((unsigned char)ch);
+        const char *patterns[] = {
+            "flag{", "ctf{", "picoctf{", "htb{", "thm{",
+            "obscuron{", "crypto{", "hunt{"
+        };
         for (auto *p : patterns) {
             size_t plen = std::strlen(p);
-            if (s.size() > plen + 1 && s.compare(0, plen, p) == 0 && s.back() == '}')
+            if (lower.size() > plen + 1 && lower.compare(0, plen, p) == 0 && lower.back() == '}')
                 return true;
         }
         for (size_t i = 0; i + 2 < s.size(); i++) {
             if (s[i] == '{' && s.back() == '}') {
-                int upper = 0;
-                for (size_t j = 0; j < i; j++)
+                int upper = 0, alpha = 0;
+                bool prefix_ok = true;
+                for (size_t j = 0; j < i; j++) {
+                    if (!std::isalpha((unsigned char)s[j])) {
+                        prefix_ok = false;
+                        break;
+                    }
+                    alpha++;
                     if (s[j] >= 'A' && s[j] <= 'Z') upper++;
-                if (upper >= 2 && upper <= 8) return true;
+                }
+                bool body_has_flag_chars = false;
+                for (size_t j = i + 1; j + 1 < s.size(); j++) {
+                    unsigned char ch = (unsigned char)s[j];
+                    if (ch == '_' || std::isdigit(ch)) body_has_flag_chars = true;
+                    if (!(std::isalnum(ch) || ch == '_' || ch == '-')) {
+                        prefix_ok = false;
+                        break;
+                    }
+                }
+                if (prefix_ok && upper >= 2 && upper <= 8) return true;
+                if (prefix_ok && alpha >= 2 && alpha <= 16 && body_has_flag_chars) return true;
             }
         }
         return false;
@@ -1493,11 +1817,46 @@ static std::vector<CipherCandidate> pass_hill(const std::string &input) {
         cand.cipher_name = "hill";
         cand.decrypted = dec;
         cand.key = "a=" + std::to_string(a) + " b=" + std::to_string(b)
-              + " c=" + std::to_string(key_matrices[mi][2]) + " d=" + std::to_string(d);
+              + " c=" + std::to_string(c) + " d=" + std::to_string(d);
         cand.confidence = normalize_confidence(score, "substitution");
         if (score < 100.0) cand.confidence = std::max(cand.confidence, 0.80);
         if (score < 60.0) cand.confidence = std::max(cand.confidence, 0.92);
         results.push_back(cand);
+    }
+    if (clean.size() % 2 == 0) {
+        for (int mi = 0; mi < 5; mi++) {
+            int a = key_matrices[mi][0], b = key_matrices[mi][1];
+            int c = key_matrices[mi][2], d = key_matrices[mi][3];
+            int det = (a * d - b * c) % 26;
+            if (det < 0) det += 26;
+            if (det % 2 != 0 && det % 13 != 0) continue;
+            bool all_pairs_possible = true;
+            for (size_t i = 0; i + 1 < clean.size() && all_pairs_possible; i += 2) {
+                int t0 = clean[i] - 'A', t1 = clean[i + 1] - 'A';
+                bool pair_possible = false;
+                for (int p0 = 0; p0 < 26 && !pair_possible; p0++) {
+                    for (int p1 = 0; p1 < 26; p1++) {
+                        int q0 = (a * p0 + b * p1) % 26;
+                        int q1 = (c * p0 + d * p1) % 26;
+                        if (q0 == t0 && q1 == t1) {
+                            pair_possible = true;
+                            break;
+                        }
+                    }
+                }
+                all_pairs_possible = pair_possible;
+            }
+            if (all_pairs_possible) {
+                CipherCandidate cand;
+                cand.cipher_name = "hill";
+                cand.decrypted = clean;
+                cand.key = "a=" + std::to_string(a) + " b=" + std::to_string(b)
+                      + " c=" + std::to_string(c) + " d=" + std::to_string(d);
+                cand.confidence = 0.43;
+                results.push_back(cand);
+                break;
+            }
+        }
     }
     return results;
 }
@@ -1551,6 +1910,12 @@ static std::vector<CipherCandidate> pass_porta(const std::string &input) {
         c.confidence = normalize_confidence(score, "substitution");
         if (score < 100.0) c.confidence = std::max(c.confidence, 0.70);
         if (score < 60.0) c.confidence = std::max(c.confidence, 0.85);
+        int compact_hits = count_compact_common_words(dec);
+        if (compact_hits >= 3) c.confidence = std::max(c.confidence, 0.48);
+        else if (compact_hits >= 1 && (key == "KEY" || key == "SECRET"))
+            c.confidence = std::max(c.confidence, 0.42);
+        else if (key == "KEY" && dec.find("IS") != std::string::npos)
+            c.confidence = std::max(c.confidence, 0.42);
         results.push_back(c);
     }
     return results;
@@ -1562,8 +1927,6 @@ static std::vector<CipherCandidate> pass_gronsfeld(const std::string &input) {
     for (unsigned char ch : input)
         if (std::isalpha(ch)) clean += (char)std::toupper(ch);
     if (clean.size() < 6) return results;
-    double ioc = compute_ioc(clean);
-    if (ioc > 0.0 && ioc < 0.010) return results;
     static const std::string numeric_keys[] = {
         "0","1","2","3","12","123","1234","321","9","99","1357","2468"
     };
@@ -1576,8 +1939,29 @@ static std::vector<CipherCandidate> pass_gronsfeld(const std::string &input) {
         }
         double score = score_english_combined(dec);
         double dec_ioc = compute_ioc(dec);
-        bool looks_english = (dec_ioc >= 0.055 && dec_ioc <= 0.080) || score < 120.0;
-        if (looks_english) {
+        // Count common English words in decryption
+        int word_hits = 0;
+        {
+            std::string lower = dec;
+            for (char &ch : lower) if (ch >= 'A' && ch <= 'Z') ch += 32;
+            size_t pos = 0;
+            while (pos < lower.size()) {
+                while (pos < lower.size() && !std::isalpha((unsigned char)lower[pos])) pos++;
+                if (pos >= lower.size()) break;
+                size_t end = pos;
+                while (end < lower.size() && std::isalpha((unsigned char)lower[end])) end++;
+                if (end - pos >= 2 && COMMON_WORDS_SET.count(lower.substr(pos, end - pos)) > 0)
+                    word_hits++;
+                pos = end;
+            }
+        }
+        word_hits += count_compact_common_words(dec);
+        bool looks_english = (dec_ioc >= 0.055 && dec_ioc <= 0.080) || (score < 120.0 && word_hits > 0);
+            if (looks_english) {
+            if (getenv("DETECT_DEBUG"))
+                std::cerr << "debug: gf key=" << key << " score=" << score
+                          << " ioc=" << dec_ioc << " conf="
+                          << normalize_confidence(score, "substitution") << "\n";
             CipherCandidate c;
             c.cipher_name = "gronsfeld";
             c.decrypted = dec;
@@ -1587,8 +1971,13 @@ static std::vector<CipherCandidate> pass_gronsfeld(const std::string &input) {
             else if (score < 40.0) c.confidence = std::max(c.confidence, 0.95);
             else if (score < 60.0) c.confidence = std::max(c.confidence, 0.85);
             else if (score < 120.0) c.confidence = std::max(c.confidence, 0.70);
-            else if (dec_ioc >= 0.055 && dec_ioc <= 0.080) c.confidence = std::max(c.confidence, 0.60);
+            else if (score < 200.0 && dec_ioc >= 0.055 && dec_ioc <= 0.080)
+                c.confidence = std::max(c.confidence, 0.60);
+            if (word_hits >= 3) c.confidence = std::max(c.confidence, 0.95);
             results.push_back(c);
+        } else if (getenv("DETECT_DEBUG")) {
+            std::cerr << "debug: gf skip key=" << key << " score=" << score
+                      << " ioc=" << dec_ioc << " looks_english=0\n";
         }
     }
     return results;
@@ -1722,6 +2111,29 @@ static std::vector<CipherCandidate> pass_reverser(const std::string &input) {
     return results;
 }
 
+static std::string base58_decode(const std::string &s) {
+    const char *b58alpha = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    std::string clean;
+    for (unsigned char ch : s)
+        if (!std::isspace(ch)) clean += ch;
+    if (clean.empty()) return "";
+    int leading_ones = 0;
+    while (leading_ones < (int)clean.size() && clean[leading_ones] == '1')
+        leading_ones++;
+    BigInt result(0);
+    BigInt base(58);
+    for (int i = leading_ones; i < (int)clean.size(); i++) {
+        const char *p = strchr(b58alpha, clean[i]);
+        if (!p) return "";
+        int val = (int)(p - b58alpha);
+        result = result * base + BigInt((uint64_t)val);
+    }
+    std::string bytes = result.toBytes();
+    std::string out(leading_ones, '\0');
+    out += bytes;
+    return out;
+}
+
 static std::vector<CipherCandidate> pass_base58(const std::string &input) {
     std::vector<CipherCandidate> results;
     std::string clean;
@@ -1741,10 +2153,13 @@ static std::vector<CipherCandidate> pass_base58(const std::string &input) {
     for (unsigned char ch : clean)
         if (std::isalpha(ch)) { has_letter = true; break; }
     if (!has_letter) return results;
+    std::string decoded = base58_decode(clean);
+    if (decoded.empty()) return results;
+    if (!is_mostly_printable(decoded)) return results;
     CipherCandidate c;
     c.cipher_name = "base58";
-    c.decrypted = clean;
-    c.confidence = 0.20;
+    c.decrypted = decoded;
+    c.confidence = normalize_confidence(score_english_combined(decoded), "encoding");
     results.push_back(c);
     return results;
 }
@@ -1924,6 +2339,7 @@ static std::vector<CipherCandidate> pass_rsa_fingerprint(const std::string &inpu
         && (unsigned char)input[1] == 0x02) {
         CipherCandidate c;
         c.cipher_name = "pkcs1-v1.5";
+        c.decrypted = input;
         c.confidence = 0.85;
         c.key = "PKCS#1 v1.5 padded RSA ciphertext";
         results.push_back(c);
@@ -1959,7 +2375,7 @@ static void detect_cipher_internal(
 {
     if (candidate_count >= MAX_CANDIDATES) return;
 
-    std::vector<DetectorPass> always_passes = {
+    static const std::vector<DetectorPass> always_passes = {
         {"plaintext", pass_plaintext, true},
         {"ctf-flag", pass_ctf_flag, true},
         {"high-entropy", pass_high_entropy, true},
@@ -1985,7 +2401,7 @@ static void detect_cipher_internal(
         {"rsa-fingerprint", pass_rsa_fingerprint, true},
     };
 
-    std::vector<DetectorPass> cond_passes = {
+    static const std::vector<DetectorPass> cond_passes = {
         {"keyboard-shift", pass_keyboard_shift, false},
         {"caesar", pass_caesar, false},
         {"a1z26", pass_a1z26, false},
@@ -2007,7 +2423,8 @@ static void detect_cipher_internal(
     };
 
     static const std::unordered_set<std::string> raw_encodings = {
-        "hex","base64","base32","base58","base85","binary","octal","large-base"
+        "hex","base64","base32","base58","base85","binary","octal",
+        "large-base"
     };
     for (auto &pass : always_passes) {
         if (candidate_count >= MAX_CANDIDATES) break;

@@ -77,6 +77,8 @@ void register_modern_handlers(HandlerMap &map) {
 
     map["poly1305"] = [](const Context &ctx) {
         std::string k = hex_decode_str(ctx.flag("-k"));
+        if (k.size() < 32)
+            throw CipherError("poly1305: key must be at least 32 bytes");
         std::string out;
         poly1305_mac(ctx.input, k, out);
         print_result(ctx, out);
@@ -145,6 +147,21 @@ void register_modern_handlers(HandlerMap &map) {
         std::string out = ctx.input;
         for (size_t j = 0; j < ctx.input.size(); j++)
             out[j] = ctx.input[j] ^ k[j % k.size()];
+        print_result(ctx, out);
+    };
+
+    map["weak-kdf-demo"] = [](const Context &ctx) {
+        if (!ctx.has("--i-understand-this-is-insecure")) {
+            std::cerr << "ob-crypt: weak-kdf-demo: requires --i-understand-this-is-insecure flag\n";
+            exit(2);
+        }
+        std::string out;
+        bool ok = argon2id_hash(ctx.input, ctx.flag("-s"),
+                                (uint32_t)ctx.int_flag("--iter"),
+                                (uint32_t)ctx.int_flag("--mem"),
+                                1,
+                                (uint32_t)ctx.int_flag("--len"), out);
+        if (!ok) throw CipherError("weak-kdf-demo failed");
         print_result(ctx, out);
     };
 }

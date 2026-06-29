@@ -63,7 +63,8 @@ Context parse_args(int argc, char *argv[]) {
         "--k","--x","--y","--g","--h","--matrix",
         "--b","--key","--text","--iv","--nonce","--aad","--tag",
         "--password","--salt","--info","--ikm","--seed","--offset",
-        "--len","--cols","--rails","--depth","--layers","--radius"
+        "--len","--cols","--rails","--depth","--layers","--radius",
+        "--secret"
     };
     size_t eq = a.find('=');
     if (eq != std::string::npos) continue;
@@ -71,7 +72,8 @@ Context parse_args(int argc, char *argv[]) {
     if (a == "--help" || a == "-h" || a == "--list" || a == "--raw"
         || a == "--verbose" || a == "--decrypt" || a == "--hex-input"
         || a == "--hex-output" || a == "--solve" || a == "--auto"
-        || a == "--no-branch" || a == "--debug") { continue; }
+        || a == "--no-branch" || a == "--debug"
+        || a == "--i-understand-this-is-insecure") { continue; }
             }
             input = a;
             break;
@@ -93,7 +95,7 @@ Context parse_args(int argc, char *argv[]) {
 static void print_list() {
     const char *names[] = {
         "a1z26", "adfgvx", "aes-cbc", "aes-ctr", "aes-ecb", "affine",
-        "analyze", "argon2id", "atbash", "autokey", "bacon", "base_decode",
+        "analyze", "atbash", "autokey", "bacon", "base_decode",
         "base_encode", "beaufort", "bifid", "big-endian", "binary",
         "blake2b", "blake2s", "blowfish", "braille", "brute-caesar",
         "brute-railfence", "brute-rotate", "brute-vigenere", "brute-xor",
@@ -105,7 +107,7 @@ static void print_list() {
         "polybius", "proper-base", "qr", "railfence", "rc4", "rot13",
         "rot47", "rot8000", "scytale", "sha1", "sha256", "sha512",
         "str-xor", "substitution", "substitution-solve", "trifid",
-        "urlcode", "vigenere", "xor", "jwt-parse", "jwt-sign",
+        "urlcode", "vigenere", "weak-kdf-demo", "xor", "jwt-parse", "jwt-sign",
         "rsa-decrypt", "rsa-wiener", "rsa-hastad", "rsa-common-modulus",
         "rsa-factor-fermat", "rsa-factor-pollard", "rsa-parity-oracle",
         "rsa-encode", "rsa-info",

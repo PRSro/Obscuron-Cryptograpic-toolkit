@@ -11,6 +11,16 @@
 
 namespace {
 
+static std::string sanitize_display(const std::string &s) {
+    std::string out;
+    for (unsigned char ch : s) {
+        if (ch >= 32 && ch <= 126) out += (char)ch;
+        else if (ch == '\t' || ch == '\n' || ch == '\r') out += (char)ch;
+        else out += ' ';
+    }
+    return out;
+}
+
 int b64_val(unsigned char ch) {
     if (ch >= 'A' && ch <= 'Z') return ch - 'A';
     if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
@@ -195,7 +205,7 @@ void register_detector_handlers(HandlerMap &map) {
                 std::cout << results[j].cipher_name;
                 if (!results[j].key.empty())
                     std::cout << "  (key: " << results[j].key << ")";
-                std::cout << "\n  " << results[j].decrypted << "\n";
+                std::cout << "\n  " << sanitize_display(results[j].decrypted) << "\n";
             }
 
             if (!no_branch) {
@@ -218,7 +228,7 @@ void register_detector_handlers(HandlerMap &map) {
                         std::cout << "+" << sub.cipher_name;
                         if (!sub.key.empty())
                             std::cout << "  (key: " << sub.key << ")";
-                        std::cout << "\n  " << sub.decrypted << "\n";
+                        std::cout << "\n  " << sanitize_display(sub.decrypted) << "\n";
                     }
                 }
             }
