@@ -1,9 +1,12 @@
 #include "recipe_engine.h"
+#include "recipe_model.h"
+#include "plugin_loader.h"
 #include "basic.h"
 #include "detector.h"
 #include "modern_ciphers.h"
 #include <QElapsedTimer>
 #include <QRegularExpression>
+#include <QMutexLocker>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -15,49 +18,101 @@ RecipeEngine::RecipeEngine(QObject *parent) : QObject(parent) {
     m_metrics.memory_used_bytes = 0;
 }
 
-void RecipeEngine::addStep(const std::string &name) {
-    RecipeStep step;
-    step.operation_name = name;
-    step.enabled = true;
-    m_steps.push_back(step);
+RecipeEngine::~RecipeEngine() {
+    cancelAsync();
 }
 
-void RecipeEngine::removeStep(int index) {
-    if (index >= 0 && index < (int)m_steps.size()) {
-        m_steps.erase(m_steps.begin() + index);
+void RecipeEngine::runAsync(const std::string &input, const std::vector<RecipeStep> &steps) {
+    cancelAsync();
+    m_asyncSteps = steps;
+    m_workerThread = QThread::create([this, input]() {
+        QElapsedTimer timer;
+        timer.start();
+        std::string current_data = input;
+        int steps_run = 0;
+        int n = (int)m_asyncSteps.size();
+
+        for (int i = 0; i < n; i++) {
+            if (QThread::currentThread()->isInterruptionRequested())
+                break;
+
+            RecipeStep &step = m_asyncSteps[i];
+            if (!step.enabled) {
+                step.intermediate_output = current_data;
+                step.has_error = false;
+                step.error_message.clear();
+                step.execution_time_ms = 0.0;
+                emit executionProgress(i, n);
+                continue;
+            }
+
+            QElapsedTimer step_timer;
+            step_timer.start();
+
+            bool success = true;
+            std::string error_msg;
+            std::string step_output = executeSingleStep(current_data, step, success, error_msg);
+
+            double elapsed_step = step_timer.nsecsElapsed() / 1000000.0;
+            step.execution_time_ms = elapsed_step;
+            step.has_error = !success;
+            step.error_message = error_msg;
+
+            if (success) {
+                current_data = step_output;
+                step.intermediate_output = current_data;
+                steps_run++;
+                emit stepExecuted(i, true, elapsed_step);
+            } else {
+                step.intermediate_output = current_data;
+                emit stepExecuted(i, false, elapsed_step);
+                break;
+            }
+            emit executionProgress(i, n);
+        }
+
+        double total_ms = timer.nsecsElapsed() / 1000000.0;
+        m_metrics.total_time_ms = total_ms;
+        m_metrics.timestamp = QDateTime::currentDateTime();
+
+        if (total_ms > 0) {
+            double bytes = input.size() + current_data.size();
+            m_metrics.throughput_mbs = (bytes / 1024.0 / 1024.0) / (total_ms / 1000.0);
+        } else {
+            m_metrics.throughput_mbs = 0;
+        }
+        m_metrics.memory_used_bytes = input.size() + current_data.size() + (steps_run * 1024);
+
+        emit executionFinished(current_data, m_metrics);
+    });
+
+    connect(m_workerThread, &QThread::finished, m_workerThread, &QObject::deleteLater);
+    m_workerThread->start();
+}
+
+void RecipeEngine::cancelAsync() {
+    if (m_workerThread) {
+        if (m_workerThread->isRunning()) {
+            m_workerThread->requestInterruption();
+            m_workerThread->quit();
+            m_workerThread->wait(3000);
+        }
+        m_workerThread = nullptr;
     }
 }
 
-void RecipeEngine::clearSteps() {
-    m_steps.clear();
-}
-
-void RecipeEngine::swapSteps(int index1, int index2) {
-    if (index1 >= 0 && index1 < (int)m_steps.size() &&
-        index2 >= 0 && index2 < (int)m_steps.size()) {
-        std::swap(m_steps[index1], m_steps[index2]);
-    }
-}
-
-void RecipeEngine::setStepEnabled(int index, bool enabled) {
-    if (index >= 0 && index < (int)m_steps.size()) {
-        m_steps[index].enabled = enabled;
-    }
-}
-
-std::string RecipeEngine::run(const std::string &input, int debug_until_step) {
+std::string RecipeEngine::run(const std::string &input, std::vector<RecipeStep> &steps, int debug_until_step) {
     QElapsedTimer timer;
     timer.start();
 
     std::string current_data = input;
     int steps_run = 0;
 
-    for (int i = 0; i < (int)m_steps.size(); i++) {
-        if (debug_until_step != -1 && i > debug_until_step) {
+    for (int i = 0; i < (int)steps.size(); i++) {
+        if (debug_until_step != -1 && i > debug_until_step)
             break;
-        }
 
-        RecipeStep &step = m_steps[i];
+        RecipeStep &step = steps[i];
         if (!step.enabled) {
             step.intermediate_output = current_data;
             step.has_error = false;
@@ -84,9 +139,8 @@ std::string RecipeEngine::run(const std::string &input, int debug_until_step) {
             steps_run++;
             emit stepExecuted(i, true, elapsed_step);
         } else {
-            step.intermediate_output = current_data; // keep previous
+            step.intermediate_output = current_data;
             emit stepExecuted(i, false, elapsed_step);
-            // Halt pipeline on error
             break;
         }
     }
@@ -95,19 +149,23 @@ std::string RecipeEngine::run(const std::string &input, int debug_until_step) {
     m_metrics.total_time_ms = total_ms;
     m_metrics.timestamp = QDateTime::currentDateTime();
 
-    // Throughput MB/s
     if (total_ms > 0) {
         double bytes = input.size() + current_data.size();
         m_metrics.throughput_mbs = (bytes / 1024.0 / 1024.0) / (total_ms / 1000.0);
     } else {
         m_metrics.throughput_mbs = 0;
     }
-
-    // Memory usage estimation (rough footprint of inputs and outputs in memory)
     m_metrics.memory_used_bytes = input.size() + current_data.size() + (steps_run * 1024);
 
     emit executionFinished(current_data, m_metrics);
     return current_data;
+}
+
+void RecipeEngine::syncResultsToModel(RecipeModel *model) const {
+    for (size_t i = 0; i < m_asyncSteps.size(); ++i) {
+        const auto &s = m_asyncSteps[i];
+        model->setStepResult(i, s.intermediate_output, s.has_error, s.error_message, s.execution_time_ms);
+    }
 }
 
 std::string RecipeEngine::executeSingleStep(const std::string &input, const RecipeStep &step, bool &success, std::string &error_msg) {
@@ -182,7 +240,6 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
                 const std::string b64alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
                 proper_base_convert(input, out, 6, b64alpha);
             } else {
-                // Perform robust Base64 decoding
                 out = base64url_decode(input);
             }
         } else if (op == "Hex") {
@@ -190,7 +247,6 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
                 const std::string hexalpha = "0123456789ABCDEF";
                 proper_base_convert(input, out, 4, hexalpha);
             } else {
-                // decode hex string to raw bytes
                 out.clear();
                 for (size_t i = 0; i + 1 < input.size(); i += 2) {
                     if (isspace(input[i])) { i--; continue; }
@@ -235,32 +291,25 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
             trifid(input, out, p.key, p.param1, p.encrypt);
         } else if (op == "Four-Square") {
             four_square(input, out, p.key, p.key, p.encrypt);
-        } 
-        // ── Modern Crypto Operations ──
+        }
         else if (op == "AES-ECB" || op == "AES-CBC" || op == "AES-CTR") {
             int mode = (op == "AES-ECB") ? 0 : (op == "AES-CBC") ? 1 : 2;
             std::string real_key = p.key;
             if (real_key.size() != 16 && real_key.size() != 32) {
-                // Autopad key to 16 or 32 bytes
                 if (real_key.size() < 16) real_key.resize(16, 0x00);
                 else if (real_key.size() < 32) real_key.resize(32, 0x00);
                 else real_key.resize(32);
             }
             std::string real_iv = p.iv;
-            if (real_iv.size() != 16) {
-                real_iv.resize(16, 0x00);
-            }
-            if (p.encrypt) {
-                success = aes_encrypt(input, real_key, real_iv, mode, out);
-            } else {
-                success = aes_decrypt(input, real_key, real_iv, mode, out);
-            }
+            if (real_iv.size() != 16) real_iv.resize(16, 0x00);
+            if (p.encrypt) success = aes_encrypt(input, real_key, real_iv, mode, out);
+            else success = aes_decrypt(input, real_key, real_iv, mode, out);
             if (!success) error_msg = "AES encryption/decryption failed (verify key/padding)";
         } else if (op == "ChaCha20") {
             std::string real_key = p.key;
-            real_key.resize(32, 0x00); // Pad key
+            real_key.resize(32, 0x00);
             std::string real_nonce = p.iv;
-            real_nonce.resize(12, 0x00); // 96-bit nonce
+            real_nonce.resize(12, 0x00);
             chacha20_crypt(input, real_key, real_nonce, p.param1, out);
         } else if (op == "Poly1305") {
             std::string real_key = p.key;
@@ -268,12 +317,11 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
             poly1305_mac(input, real_key, out);
         } else if (op == "HMAC-SHA256") {
             hmac_sha256(input, p.key, out);
-            out = from_hex(out); // output raw bytes for chaining
+            out = from_hex(out);
         } else if (op == "HMAC-SHA512") {
             hmac_sha512(input, p.key, out);
             out = from_hex(out);
-        } 
-        // ── Hashing & PBKDF2/Argon2 ──
+        }
         else if (op == "MD5") {
             md5_hash(input, out);
             out = from_hex(out);
@@ -305,10 +353,8 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
             success = argon2id_hash(input, salt, iter, mem, 1, 32, out);
             out = from_hex(out);
             if (!success) error_msg = "Argon2id KDF failed";
-        } 
-        // ── JWT / QR / Stego ──
+        }
         else if (op == "JWT Sign") {
-            // Assume input is JWT payload JSON, key is key, iv or custom is header JSON
             std::string header = p.iv;
             if (header.empty()) header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
             out = jwt_sign(header, input, p.key);
@@ -329,7 +375,6 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
             }
             out = ss.str();
         } else if (op == "LSB Embed") {
-            // Key acts as text to embed, input acts as carrier bytes
             if (p.key.empty()) { success = false; error_msg = "Data to embed (Key) cannot be empty"; return input; }
             success = lsb_embed(input, p.key, out);
             if (!success) error_msg = "LSB embedding failed (carrier input too small)";
@@ -349,6 +394,15 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
                 else if (ch == 'T') c = '7';
                 else if (ch == 'Z') c = '2';
             }
+        } else if (m_pluginLoader) {
+            std::string pluginOut = m_pluginLoader->tryExecute(op, input,
+                p.key, p.iv, p.param1, p.param2, p.encrypt, success, error_msg);
+            if (success) out = pluginOut;
+            else if (error_msg.empty()) {
+                success = false;
+                error_msg = "Unknown operation: " + op;
+                return input;
+            }
         } else {
             success = false;
             error_msg = "Unknown operation: " + op;
@@ -363,11 +417,10 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
     return out;
 }
 
-// Simple Parser for Macro Script syntax: e.g. "base64_decode() | rot13() | aes_encrypt(key='abc', iv='123')"
-bool RecipeEngine::parseMacroScript(const std::string &script, std::string &error_msg) {
-    clearSteps();
+bool RecipeEngine::parseMacroScript(const std::string &script, RecipeModel *model, std::string &error_msg) {
+    model->clear();
     QStringList sections = QString::fromStdString(script).split('|');
-    
+
     for (int i = 0; i < sections.size(); ++i) {
         QString sec = sections[i].trimmed();
         if (sec.isEmpty()) continue;
@@ -384,7 +437,6 @@ bool RecipeEngine::parseMacroScript(const std::string &script, std::string &erro
         raw_name = raw_name.trimmed();
         std::string cmd = raw_name.toStdString();
 
-        // Map short names to standard operation names
         std::string mapped_name = cmd;
         if (cmd == "rot13") mapped_name = "ROT13";
         else if (cmd == "rot47") mapped_name = "ROT47";
@@ -397,10 +449,9 @@ bool RecipeEngine::parseMacroScript(const std::string &script, std::string &erro
         else if (cmd == "sha256") mapped_name = "SHA-256";
         else if (cmd == "md5") mapped_name = "MD5";
 
-        // Parse key-value arguments: e.g. "key='hello', iv='world', param1=5"
         QString args = match.captured(2).trimmed();
         StepParams p;
-        
+
         if (!args.isEmpty()) {
             QStringList kv_pairs = args.split(',');
             for (QString kv : kv_pairs) {
@@ -408,7 +459,6 @@ bool RecipeEngine::parseMacroScript(const std::string &script, std::string &erro
                 if (parts.size() == 2) {
                     QString k = parts[0].trimmed().toLower();
                     QString v = parts[1].trimmed();
-                    // strip quotes if string
                     if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith("\"") && v.endsWith("\""))) {
                         v.chop(1);
                         v.remove(0, 1);
@@ -422,67 +472,7 @@ bool RecipeEngine::parseMacroScript(const std::string &script, std::string &erro
             }
         }
 
-        RecipeStep step;
-        step.operation_name = mapped_name;
-        step.enabled = true;
-        step.params = p;
-        m_steps.push_back(step);
-    }
-    return true;
-}
-
-// JSON import and export for recipe sharing
-std::string RecipeEngine::exportToJSON() const {
-    QJsonArray array;
-    for (const auto &step : m_steps) {
-        QJsonObject obj;
-        obj["name"] = QString::fromStdString(step.operation_name);
-        obj["enabled"] = step.enabled;
-        
-        QJsonObject params;
-        params["key"] = QString::fromStdString(step.params.key);
-        params["iv"] = QString::fromStdString(step.params.iv);
-        params["param1"] = step.params.param1;
-        params["param2"] = step.params.param2;
-        params["encrypt"] = step.params.encrypt;
-        obj["params"] = params;
-
-        array.append(obj);
-    }
-
-    QJsonDocument doc(array);
-    return doc.toJson(QJsonDocument::Compact).toStdString();
-}
-
-bool RecipeEngine::importFromJSON(const std::string &json_str, std::string &error_msg) {
-    QJsonParseError parse_err;
-    QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(json_str), &parse_err);
-    if (doc.isNull()) {
-        error_msg = "JSON Parse Error: " + parse_err.errorString().toStdString();
-        return false;
-    }
-
-    if (!doc.isArray()) {
-        error_msg = "Root element is not a JSON array";
-        return false;
-    }
-
-    clearSteps();
-    QJsonArray array = doc.array();
-    for (int i = 0; i < array.size(); ++i) {
-        QJsonObject obj = array[i].toObject();
-        RecipeStep step;
-        step.operation_name = obj["name"].toString().toStdString();
-        step.enabled = obj["enabled"].toBool(true);
-
-        QJsonObject params = obj["params"].toObject();
-        step.params.key = params["key"].toString().toStdString();
-        step.params.iv = params["iv"].toString().toStdString();
-        step.params.param1 = params["param1"].toInt(0);
-        step.params.param2 = params["param2"].toInt(0);
-        step.params.encrypt = params["encrypt"].toBool(true);
-
-        m_steps.push_back(step);
+        model->addStep(mapped_name, p);
     }
     return true;
 }

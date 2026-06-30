@@ -263,8 +263,8 @@ void RsaAttackDialog::onRun() {
                 ? bytes.substr(pos) : bytes;
             oss << "Decrypted: " << plaintext << "\nhex: " << m_hex;
         } else if (op == "RSA Wiener Attack") {
-            std::string d_hex, err;
-            if (!ntl_rsa_wiener(p1, p2, d_hex, err))
+            std::string d_hex, p_hex, q_hex, err;
+            if (!ntl_rsa_wiener(p1, p2, d_hex, p_hex, q_hex, err))
                 throw std::runtime_error(err);
             BigInt d = BigInt::from_hex(d_hex);
             oss << "d (hex): " << d_hex << "\nd (dec): " << d.toString();

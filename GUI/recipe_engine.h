@@ -6,8 +6,8 @@
 #include <map>
 #include <QObject>
 #include <QDateTime>
+#include <QThread>
 
-// Structure to hold step parameters
 struct StepParams {
     std::string key;
     std::string iv;
@@ -17,20 +17,16 @@ struct StepParams {
     std::map<std::string, std::string> custom_params;
 };
 
-// Represents a single active operation in a workflow chain
 struct RecipeStep {
     std::string operation_name;
     bool enabled = true;
     StepParams params;
-    
-    // Intermediate results for debugging
     std::string intermediate_output;
     bool has_error = false;
     std::string error_message;
     double execution_time_ms = 0.0;
 };
 
-// Metrics collected after executing a recipe
 struct RecipeMetrics {
     double total_time_ms = 0.0;
     double throughput_mbs = 0.0;
@@ -38,41 +34,49 @@ struct RecipeMetrics {
     QDateTime timestamp;
 };
 
+class PluginLoader;
+class RecipeModel;
+
 class RecipeEngine : public QObject {
     Q_OBJECT
 public:
     RecipeEngine(QObject *parent = nullptr);
-    ~RecipeEngine() = default;
+    ~RecipeEngine();
 
-    // Manage steps
-    void addStep(const std::string &name);
-    void removeStep(int index);
-    void clearSteps();
-    void swapSteps(int index1, int index2);
-    void setStepEnabled(int index, bool enabled);
-    const std::vector<RecipeStep>& getSteps() const { return m_steps; }
-    std::vector<RecipeStep>& getSteps() { return m_steps; }
+    void setPluginLoader(PluginLoader *loader) { m_pluginLoader = loader; }
 
-    // Execute recipe
-    std::string run(const std::string &input, int debug_until_step = -1);
-    
-    // Macro Scripting Parser
-    bool parseMacroScript(const std::string &script, std::string &error_msg);
-    std::string exportToJSON() const;
-    bool importFromJSON(const std::string &json_str, std::string &error_msg);
+    // Synchronous execution — takes steps, writes results back, returns output
+    std::string run(const std::string &input, std::vector<RecipeStep> &steps, int debug_until_step = -1);
 
-    // Get latest execution statistics
+    // Async execution
+    void setThreadingEnabled(bool enabled) { m_threadingEnabled = enabled; }
+    bool isThreadingEnabled() const { return m_threadingEnabled; }
+    void runAsync(const std::string &input, const std::vector<RecipeStep> &steps);
+    void cancelAsync();
+    bool isRunningAsync() const { return m_workerThread && m_workerThread->isRunning(); }
+
+    // Copy async execution results into a model
+    void syncResultsToModel(RecipeModel *model) const;
+
+    // Macro Scripting Parser — adds steps to model
+    bool parseMacroScript(const std::string &script, RecipeModel *model, std::string &error_msg);
+
     const RecipeMetrics& getLatestMetrics() const { return m_metrics; }
+    const std::vector<RecipeStep>& asyncSteps() const { return m_asyncSteps; }
 
 signals:
     void executionFinished(const std::string &final_output, const RecipeMetrics &metrics);
     void stepExecuted(int step_index, bool success, double time_ms);
+    void executionProgress(int currentStep, int totalSteps);
 
 private:
-    std::vector<RecipeStep> m_steps;
-    RecipeMetrics m_metrics;
-
     std::string executeSingleStep(const std::string &input, const RecipeStep &step, bool &success, std::string &error_msg);
+
+    RecipeMetrics m_metrics;
+    PluginLoader *m_pluginLoader = nullptr;
+    bool m_threadingEnabled = false;
+    QThread *m_workerThread = nullptr;
+    std::vector<RecipeStep> m_asyncSteps;
 };
 
 #endif // RECIPE_ENGINE_H

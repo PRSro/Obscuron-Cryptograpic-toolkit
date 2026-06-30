@@ -3,29 +3,33 @@
 
 #include <QMainWindow>
 #include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QPushButton>
 #include <QLabel>
-#include <QListWidget>
+#include <QListView>
 #include <QTreeWidget>
 #include <QTabWidget>
 #include <QSplitter>
 #include <QCheckBox>
+#include <QListWidget>
 #include <QStackedWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QProgressBar>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-
+#include <QUndoStack>
 
 #include "recipe_engine.h"
+#include "recipe_model.h"
+#include "recipe_commands.h"
 #include "visualizer_widgets.h"
 #include "theme_manager.h"
+#include "plugin_loader.h"
 
-// DropEdit for handling file drops
 class DropEdit : public QPlainTextEdit {
     Q_OBJECT
 public:
@@ -35,31 +39,6 @@ signals:
 protected:
     void dragEnterEvent(QDragEnterEvent *e) override;
     void dropEvent(QDropEvent *e) override;
-};
-
-// Custom widget for items in the Recipe Canvas list
-class RecipeCardWidget : public QWidget {
-    Q_OBJECT
-public:
-    RecipeCardWidget(const QString &name, int index, QWidget *parent = nullptr);
-    void setStatus(bool success, const QString &err_msg = "");
-    void setEnabledState(bool enabled);
-
-signals:
-    void deleteClicked(int index);
-    void toggleEnabledClicked(int index, bool enabled);
-    void moveUpClicked(int index);
-    void moveDownClicked(int index);
-
-private:
-    QLabel *m_nameLabel;
-    QLabel *m_statusLabel;
-    QPushButton *m_toggleBtn;
-    QPushButton *m_deleteBtn;
-    QPushButton *m_upBtn;
-    QPushButton *m_downBtn;
-    int m_index;
-    bool m_isEnabled;
 };
 
 class MainWindow : public QMainWindow {
@@ -73,12 +52,11 @@ private slots:
     void onAddOperation(QTreeWidgetItem *item, int column);
     void onRecipeItemSelectionChanged();
     void onRecipeCardDelete(int index);
-    void onRecipeCardToggleEnabled(int index, bool enabled);
+    void onRecipeCardToggleEnabled(int index);
     void onRecipeCardMoveUp(int index);
     void onRecipeCardMoveDown(int index);
     void onParameterChanged();
-    
-    // Bottom panel UI updates
+
     void onInputTextChanged();
     void onFileLoaded(const QString &filePath, const QByteArray &content);
     void onClearFile();
@@ -86,24 +64,24 @@ private slots:
     void onExportOutput(const QString &ext);
     void onWheelBaseSelected(int radix);
 
-    // Menu and settings actions
     void onThemeChanged(int index);
     void onOpenSettings();
-    void onUndo();
-    void onRedo();
-    
     void onDetectCipher();
-    
-    // Macro and recipe templates
+
     void onApplyMacro();
     void onSaveRecipe();
     void onLoadRecipe();
     void onTemplateSelected(int index);
 
-    // CTF mode
+    void onOpenPluginBrowser();
+    void onPluginLibraryChanged();
+
     void onRunCtfSearch();
     void onCtfFlagCheck();
     void onRunTlsAttack();
+
+    void onAsyncExecutionFinished(const std::string &output, const RecipeMetrics &metrics);
+    void onCancelAsync();
 
 private:
     void setupUI();
@@ -111,36 +89,46 @@ private:
     void updateSettingsPanel(int stepIndex);
     void displayOutputFormat(const std::string &output);
     void runCtfDictionaryBrute(const std::string &input, const std::string &flagFormat);
-    void pushUndo();
+    void applyPipelineResults(const std::string &out);
+    void setUIControlsEnabled(bool enabled);
+
+    void runRecipeOnSteps();
 
     // UI Widgets
     QTreeWidget *m_opLibrary;
     QLineEdit *m_librarySearch;
-    QListWidget *m_recipeList;
+    QListView *m_recipeView;
+    RecipeDelegate *m_recipeDelegate;
     QWidget *m_settingsContainer;
     QVBoxLayout *m_settingsLayout;
-    
+
     DropEdit *m_inputEdit;
     QFrame *m_fileUploadFrame;
     QLabel *m_fileNameLabel;
     QProgressBar *m_fileProgress;
-    
+
     QTabWidget *m_outputTabs;
-    QPlainTextEdit *m_outputText;
+    QTextEdit *m_outputText;
     QPlainTextEdit *m_outputByteBreakdown;
     QPlainTextEdit *m_outputDiff;
-    
+
     // Plots / charts
     FrequencyHistogram *m_histogram;
     EntropyHeatmap *m_heatmap;
     ShannonEntropyGraph *m_entropyGraph;
     EncodingWheel *m_encodingWheel;
+    AutocorrelationGraph *m_autocorrGraph;
+    NGramHeatmap *m_ngramHeatmap;
+    HexDiffViewer *m_hexDiff;
+    DataMiniMap *m_miniMap;
+    BlockCipherModeViz *m_blockViz;
 
     // Top Bar controls
     QLabel *m_metricsLabel;
     QCheckBox *m_autoRunCheck;
     QPushButton *m_undoBtn;
     QPushButton *m_redoBtn;
+    QPushButton *m_cancelBtn;
     QComboBox *m_themeCombo;
 
     // CTF sidebar panel
@@ -149,14 +137,15 @@ private:
     QListWidget *m_ctfResults;
     QLabel *m_ctfMatchCount;
 
-    // Backend engine
+    // Backend engine, model, undo
     RecipeEngine m_engine;
+    RecipeModel *m_recipeModel;
+    QUndoStack *m_undoStack;
+    PluginLoader m_pluginLoader;
     std::string m_rawInput;
-    
-    // History stacks for Undo/Redo
-    std::vector<std::string> m_undoStack;
-    std::vector<std::string> m_redoStack;
-    bool m_isUndoingOrRedoing = false;
+
+    // Async execution tracking
+    QMetaObject::Connection m_asyncFinishConn;
 };
 
 #endif // MAINWINDOW_H

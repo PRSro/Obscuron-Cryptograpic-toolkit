@@ -128,6 +128,30 @@ void SettingsDialog::setupUI() {
     dispLayout->addStretch();
     m_tabs->addTab(displayTab, "Display");
 
+    // ── Performance Tab ──
+    QWidget *perfTab = new QWidget();
+    QVBoxLayout *perfLayout = new QVBoxLayout(perfTab);
+    perfLayout->setSpacing(10);
+
+    QGroupBox *perfGrp = new QGroupBox("Pipeline Execution");
+    QVBoxLayout *pL = new QVBoxLayout(perfGrp);
+
+    m_multiThread = new QCheckBox("Enable multi-threaded pipeline execution");
+    m_multiThread->setToolTip("Runs recipe operations in a background thread to keep the UI responsive");
+    pL->addWidget(m_multiThread);
+
+    QLabel *perfNote = new QLabel(
+        "When enabled, long-running operations will not freeze the interface.\n"
+        "Controls are temporarily disabled during execution."
+    );
+    perfNote->setWordWrap(true);
+    perfNote->setStyleSheet("color: #8880a0; font-size: 10px; padding: 4px;");
+    pL->addWidget(perfNote);
+
+    perfLayout->addWidget(perfGrp);
+    perfLayout->addStretch();
+    m_tabs->addTab(perfTab, "Performance");
+
     // ── About Tab ──
     QWidget *aboutTab = new QWidget();
     QVBoxLayout *aboutLayout = new QVBoxLayout(aboutTab);
@@ -205,6 +229,8 @@ void SettingsDialog::loadSettings() {
     m_autoRunDefault->setChecked(s.value("display/autoRun", true).toBool());
     m_maxOutputLines->setValue(s.value("display/maxLines", 5000).toInt());
 
+    m_multiThread->setChecked(s.value("performance/multiThread", false).toBool());
+
     onAccentSliderChanged();
 }
 
@@ -225,6 +251,8 @@ void SettingsDialog::saveSettings() {
     s.setValue("display/showHexAddr", m_showHexAddr->isChecked());
     s.setValue("display/autoRun", m_autoRunDefault->isChecked());
     s.setValue("display/maxLines", m_maxOutputLines->value());
+
+    s.setValue("performance/multiThread", m_multiThread->isChecked());
 
     s.sync();
 }

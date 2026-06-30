@@ -9,9 +9,12 @@
 #include "settings_dialog.h"
 #include "detector.h"
 #include "basic.h"
+#include "command_palette.h"
+#include "toast_widget.h"
+#include "plugin_browser_dialog.h"
+#include "script_console_dialog.h"
 #include <sstream>
 #include <iomanip>
-
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -29,10 +32,19 @@
 #include <QHeaderView>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QSettings>
 #include <QTextStream>
 #include <QScrollBar>
+#include <QShortcut>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QDir>
+#include <QTimer>
+#include <QGraphicsDropShadowEffect>
+#include <QRegularExpression>
+#include <QTextEdit>
 #include <QScrollArea>
-
 
 // ── DropEdit ──────────────────────────────────────────────────────────
 
@@ -61,105 +73,37 @@ void DropEdit::dropEvent(QDropEvent *e) {
     QPlainTextEdit::dropEvent(e);
 }
 
-// ── RecipeCardWidget ──────────────────────────────────────────────────
-
-RecipeCardWidget::RecipeCardWidget(const QString &name, int index, QWidget *parent)
-    : QWidget(parent), m_index(index), m_isEnabled(true)
-{
-    setStyleSheet(
-        "RecipeCardWidget { background:#120a20; border:1px solid #1e1850; border-radius:4px; }"
-    );
-    QHBoxLayout *layout = new QHBoxLayout(this);
-    layout->setContentsMargins(8, 4, 8, 4);
-    layout->setSpacing(6);
-
-    // Status dot
-    m_statusLabel = new QLabel("●");
-    m_statusLabel->setStyleSheet("color: #00cc88; font-size: 14px;");
-    layout->addWidget(m_statusLabel);
-
-    // Operation Name
-    m_nameLabel = new QLabel(name);
-    m_nameLabel->setStyleSheet("font-weight: bold; font-size: 11px;");
-    layout->addWidget(m_nameLabel, 1);
-
-    // Up/Down buttons
-    m_upBtn = new QPushButton("▲");
-    m_upBtn->setFixedSize(22, 22);
-    m_upBtn->setStyleSheet("padding: 0px; font-size: 9px;");
-    layout->addWidget(m_upBtn);
-
-    m_downBtn = new QPushButton("▼");
-    m_downBtn->setFixedSize(22, 22);
-    m_downBtn->setStyleSheet("padding: 0px; font-size: 9px;");
-    layout->addWidget(m_downBtn);
-
-    // Eye button to toggle enable
-    m_toggleBtn = new QPushButton("👁");
-    m_toggleBtn->setFixedSize(24, 22);
-    m_toggleBtn->setCheckable(true);
-    m_toggleBtn->setStyleSheet("padding: 0px; font-size: 11px;");
-    layout->addWidget(m_toggleBtn);
-
-    // Delete button
-    m_deleteBtn = new QPushButton("✕");
-    m_deleteBtn->setFixedSize(22, 22);
-    m_deleteBtn->setStyleSheet("padding: 0px; color: #ff6b6b; font-weight: bold; font-size: 10px;");
-    layout->addWidget(m_deleteBtn);
-
-    // Connects
-    connect(m_deleteBtn, &QPushButton::clicked, this, [this]() {
-        emit deleteClicked(m_index);
-    });
-    connect(m_toggleBtn, &QPushButton::clicked, this, [this](bool checked) {
-        emit toggleEnabledClicked(m_index, !checked);
-    });
-    connect(m_upBtn, &QPushButton::clicked, this, [this]() {
-        emit moveUpClicked(m_index);
-    });
-    connect(m_downBtn, &QPushButton::clicked, this, [this]() {
-        emit moveDownClicked(m_index);
-    });
-}
-
-void RecipeCardWidget::setStatus(bool success, const QString &err_msg) {
-    if (success) {
-        m_statusLabel->setText("●");
-        m_statusLabel->setStyleSheet("color: #00cc88;");
-        m_nameLabel->setToolTip("");
-    } else {
-        m_statusLabel->setText("▲");
-        m_statusLabel->setStyleSheet("color: #ff6b6b;");
-        m_nameLabel->setToolTip(err_msg);
-    }
-}
-
-void RecipeCardWidget::setEnabledState(bool enabled) {
-    m_isEnabled = enabled;
-    if (enabled) {
-        m_nameLabel->setStyleSheet("font-weight: bold; font-size: 11px; color: #e0e0f0;");
-        m_toggleBtn->setText("👁");
-    } else {
-        m_nameLabel->setStyleSheet("font-weight: bold; font-size: 11px; color: #3a3060; text-decoration: line-through;");
-        m_toggleBtn->setText("❌");
-        m_statusLabel->setStyleSheet("color: #3a3060;");
-    }
-}
-
 // ── MainWindow ───────────────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
-    m_isUndoingOrRedoing = false;
+    m_recipeModel = new RecipeModel(this);
+    m_undoStack = new QUndoStack(this);
+    m_undoStack->setUndoLimit(100);
+
     setupUI();
-    pushUndo(); // Initial state
+    m_undoStack->clear(); // initial state
+    m_undoBtn->setEnabled(false);
+    m_redoBtn->setEnabled(false);
+
+    // Plugin system
+    m_engine.setPluginLoader(&m_pluginLoader);
+    connect(&m_pluginLoader, &PluginLoader::pluginLoaded,
+            this, &MainWindow::onPluginLibraryChanged);
+
+    // Auto-scan ~/.obscuron/plugins/
+    QString pluginDir = QDir::homePath() + "/.obscuron/plugins/";
+    QDir dir(pluginDir);
+    if (dir.exists()) {
+        for (const QFileInfo &fi : dir.entryInfoList({"*.so"}, QDir::Files))
+            m_pluginLoader.loadPlugin(fi.absoluteFilePath().toStdString());
+        onPluginLibraryChanged();
+    }
 }
 
 void MainWindow::setupUI() {
     setWindowTitle("Obscuron — Cryptographic Analysis Workspace");
     setMinimumSize(1200, 800);
 
-    // Apply dark style locally — do not call ThemeManager::applyTheme()
-    // (that sets qApp->setStyleSheet globally, corrupting other windows)
     setStyleSheet(QString::fromStdString(
         "QMainWindow { background: #0a0514; }"
         "QWidget { color: #e0e0f0; font-family: 'Courier New', monospace; }"
@@ -179,11 +123,9 @@ void MainWindow::setupUI() {
         "  border-radius: 6px; padding: 8px 18px; font-family: 'Courier New', monospace; font-weight: bold; }"
         "QPushButton:hover { border: 1px solid #4a7cff; color: #6b9cff; background: #120a20; }"
         "QPushButton:pressed { background: #4a7cff; color: #ffffff; }"
-        "QListWidget { background: #120a20; color: #e0e0f0; border: 1px solid #1e1850; "
-        "  border-radius: 6px; font-family: 'Courier New', monospace; font-size: 12px; padding: 4px; }"
-        "QListWidget::item { padding: 6px; border-radius: 4px; }"
-        "QListWidget::item:hover { background: #1a1030; }"
-        "QListWidget::item:selected { background: #4a7cff; color: #ffffff; }"
+        "QListView { background:#0a0514; border:1px dashed #2a2270; border-radius:4px; }"
+        "QListView::item { background:transparent; }"
+        "QListView::item:selected { background:#1a1030; border:1px solid #4a7cff; }"
         "QLabel { color: #e0e0f0; font-family: 'Courier New', monospace; }"
         "QGroupBox { border: 1px solid #1e1850; border-radius: 8px; margin-top: 14px; "
         "  padding-top: 16px; font-family: 'Courier New', monospace; font-weight: bold; color: #6b9cff; }"
@@ -207,15 +149,14 @@ void MainWindow::setupUI() {
     mainLayout->setContentsMargins(12, 8, 12, 8);
     mainLayout->setSpacing(6);
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     // 1. TOP BAR
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     QHBoxLayout *topBar = new QHBoxLayout();
-    
+
     QPushButton *backBtn = new QPushButton("← BACK MENU");
     backBtn->setFixedWidth(120);
     topBar->addWidget(backBtn);
-
     connect(backBtn, &QPushButton::clicked, this, [this]{
         MenuWindow *m = new MenuWindow();
         m->setAttribute(Qt::WA_DeleteOnClose);
@@ -230,7 +171,6 @@ void MainWindow::setupUI() {
     title->setStyleSheet("color: #6b9cff;");
     topBar->addWidget(title, 1, Qt::AlignCenter);
 
-    // Metrics & Controls
     m_metricsLabel = new QLabel("Time: 0.0 ms | Speed: 0.0 MB/s | Mem: 0 B");
     m_metricsLabel->setStyleSheet("color: #00cc88; font-weight: bold; font-size: 10px; margin-right: 12px;");
     topBar->addWidget(m_metricsLabel);
@@ -244,13 +184,30 @@ void MainWindow::setupUI() {
     m_undoBtn->setFixedSize(30, 28);
     m_undoBtn->setToolTip("Undo");
     topBar->addWidget(m_undoBtn);
-    connect(m_undoBtn, &QPushButton::clicked, this, &MainWindow::onUndo);
+    connect(m_undoBtn, &QPushButton::clicked, m_undoStack, &QUndoStack::undo);
+    connect(m_undoStack, &QUndoStack::canUndoChanged, m_undoBtn, &QPushButton::setEnabled);
+    connect(m_undoStack, &QUndoStack::canUndoChanged, this, [this](){
+        if (!m_undoStack->canUndo()) m_redoBtn->setEnabled(m_undoStack->canRedo());
+    });
 
     m_redoBtn = new QPushButton("⟳");
     m_redoBtn->setFixedSize(30, 28);
     m_redoBtn->setToolTip("Redo");
     topBar->addWidget(m_redoBtn);
-    connect(m_redoBtn, &QPushButton::clicked, this, &MainWindow::onRedo);
+    connect(m_redoBtn, &QPushButton::clicked, m_undoStack, &QUndoStack::redo);
+    connect(m_undoStack, &QUndoStack::canRedoChanged, m_redoBtn, &QPushButton::setEnabled);
+
+    m_cancelBtn = new QPushButton("✕");
+    m_cancelBtn->setFixedSize(30, 28);
+    m_cancelBtn->setToolTip("Cancel running operation");
+    m_cancelBtn->setVisible(false);
+    m_cancelBtn->setStyleSheet(
+        "QPushButton { background:#4a0000; color:#ff6b6b; border:1px solid #8b0000;"
+        "  border-radius:4px; font-weight:bold; font-size:14px; }"
+        "QPushButton:hover { background:#6b0000; }"
+    );
+    topBar->addWidget(m_cancelBtn);
+    connect(m_cancelBtn, &QPushButton::clicked, this, &MainWindow::onCancelAsync);
 
     m_themeCombo = new QComboBox();
     m_themeCombo->addItem("DARK THEME");
@@ -266,6 +223,23 @@ void MainWindow::setupUI() {
     topBar->addWidget(settingsBtn);
     connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
 
+    QPushButton *scriptBtn = new QPushButton("SCRIPT");
+    scriptBtn->setFixedWidth(70);
+    scriptBtn->setStyleSheet(
+        "QPushButton { background:#1a1030; color:#00cc88; border:1px solid #006633;"
+        "  border-radius:4px; padding:6px 8px; font-size:10px; font-weight:bold; }"
+        "QPushButton:hover { border-color:#00cc88; background:#003322; }"
+    );
+    topBar->addWidget(scriptBtn);
+    connect(scriptBtn, &QPushButton::clicked, this, [this]{
+        ScriptConsoleDialog dlg(QString::fromStdString(m_rawInput), this);
+        if (dlg.exec() == QDialog::Accepted) {
+            std::string scriptResult = dlg.result().toStdString();
+            if (!scriptResult.empty())
+                applyPipelineResults(scriptResult);
+        }
+    });
+
     QPushButton *advancedBtn = new QPushButton("ADVANCED");
     advancedBtn->setFixedWidth(100);
     advancedBtn->setStyleSheet(
@@ -273,6 +247,13 @@ void MainWindow::setupUI() {
         "  border-radius:4px; padding:6px 12px; font-size:10px; font-weight:bold; }"
         "QPushButton:hover { border-color:#4a7cff; color:#4a7cff; }"
     );
+    {
+        auto *glow = new QGraphicsDropShadowEffect(advancedBtn);
+        glow->setBlurRadius(12);
+        glow->setOffset(0, 0);
+        glow->setColor(QColor(74, 124, 255, 60));
+        advancedBtn->setGraphicsEffect(glow);
+    }
     topBar->addWidget(advancedBtn);
     connect(advancedBtn, &QPushButton::clicked, this, [this]{
         AdvancedCryptDialog dlg(this);
@@ -286,17 +267,24 @@ void MainWindow::setupUI() {
         "  border-radius:4px; padding:6px 12px; font-size:10px; font-weight:bold; }"
         "QPushButton:hover { border-color:#4a7cff; color:#4a7cff; }"
     );
+    {
+        auto *glow = new QGraphicsDropShadowEffect(detectBtn);
+        glow->setBlurRadius(14);
+        glow->setOffset(0, 0);
+        glow->setColor(QColor(0, 204, 136, 50));
+        detectBtn->setGraphicsEffect(glow);
+    }
     topBar->addWidget(detectBtn);
     connect(detectBtn, &QPushButton::clicked, this, &MainWindow::onDetectCipher);
 
     mainLayout->addLayout(topBar);
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 2. MAIN LAYOUT SPLITTER (Three vertical sections: Left, Center, Right)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // 2. MAIN LAYOUT SPLITTER
+    // ─────────────────────────────────────────────────────────────────────
     QSplitter *mainSplitter = new QSplitter(Qt::Horizontal, this);
 
-    // LEFT PANEL: Library of Ciphers & Operations
+    // LEFT PANEL
     QWidget *leftPanel = new QWidget();
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
     leftLayout->setContentsMargins(0, 0, 0, 0);
@@ -314,7 +302,6 @@ void MainWindow::setupUI() {
     m_opLibrary->setHeaderHidden(true);
     m_opLibrary->setAnimated(true);
 
-    // Populating Library tree
     auto addCategory = [this](const QString &catName, const QStringList &ops) {
         QTreeWidgetItem *category = new QTreeWidgetItem(m_opLibrary);
         category->setText(0, catName);
@@ -328,9 +315,9 @@ void MainWindow::setupUI() {
     };
 
     addCategory("Classical Ciphers", {
-        "Caesar", "ROT13", "ROT47", "Atbash", "Vigenere", "Playfair", "Affine", 
-        "Railfence", "Columnar", "Morse", "Baconian", "Keyword", "Substitution", 
-        "A1Z26", "Keyboard Shift", "Beaufort", "Autokey", "Scytale", 
+        "Caesar", "ROT13", "ROT47", "Atbash", "Vigenere", "Playfair", "Affine",
+        "Railfence", "Columnar", "Morse", "Baconian", "Keyword", "Substitution",
+        "A1Z26", "Keyboard Shift", "Beaufort", "Autokey", "Scytale",
         "Polybius Square", "Bifid", "Trifid", "Four-Square"
     });
     addCategory("Modern Cryptography", {
@@ -346,17 +333,29 @@ void MainWindow::setupUI() {
         "JWT Sign", "JWT Verify", "QR Code", "LSB Embed", "LSB Extract", "Leetspeak"
     });
 
+    QTreeWidgetItem *pluginsCategory = new QTreeWidgetItem(m_opLibrary);
+    pluginsCategory->setText(0, "Plugins");
+    pluginsCategory->setFont(0, QFont("Courier New", 10, QFont::Bold));
+    pluginsCategory->setForeground(0, QColor("#00cc88"));
+
     m_opLibrary->expandAll();
     leftLayout->addWidget(m_opLibrary);
-    
-    // Operation description overlay details
+
+    QPushButton *managePluginsBtn = new QPushButton("MANAGE PLUGINS");
+    managePluginsBtn->setStyleSheet(
+        "font-size: 9px; padding: 4px; color: #00cc88;"
+        "border: 1px solid #00cc88; border-radius: 4px;"
+    );
+    leftLayout->addWidget(managePluginsBtn);
+    connect(managePluginsBtn, &QPushButton::clicked, this, &MainWindow::onOpenPluginBrowser);
+
     QLabel *descHelp = new QLabel("Double-click to add to recipe.");
     descHelp->setStyleSheet("color: #8880a0; font-size: 9px;");
     leftLayout->addWidget(descHelp);
 
     mainSplitter->addWidget(leftPanel);
 
-    // CENTER PANEL: Recipe Canvas / Builder chain
+    // CENTER PANEL: Recipe Canvas
     QWidget *centerPanel = new QWidget();
     QVBoxLayout *centerLayout = new QVBoxLayout(centerPanel);
     centerLayout->setContentsMargins(0, 0, 0, 0);
@@ -372,23 +371,48 @@ void MainWindow::setupUI() {
     clearRecipeBtn->setStyleSheet("font-size: 9px; padding: 2px;");
     recipeTitleRow->addWidget(clearRecipeBtn);
     connect(clearRecipeBtn, &QPushButton::clicked, this, [this]() {
-        m_engine.clearSteps();
-        updateRecipeCanvas();
-        updateSettingsPanel(m_recipeList->currentRow());
-        onRunRecipe();
+        m_recipeModel->clear();
+        m_undoStack->clear();
+        updateSettingsPanel(-1);
+        runRecipeOnSteps();
     });
+
+    recipeTitleRow->addStretch();
+    QPushButton *saveBtn = new QPushButton("SAVE");
+    saveBtn->setFixedSize(50, 20);
+    saveBtn->setStyleSheet("font-size: 9px; padding: 2px; color: #00cc88;");
+    recipeTitleRow->addWidget(saveBtn);
+    connect(saveBtn, &QPushButton::clicked, this, &MainWindow::onSaveRecipe);
+
+    QPushButton *loadBtn = new QPushButton("LOAD");
+    loadBtn->setFixedSize(50, 20);
+    loadBtn->setStyleSheet("font-size: 9px; padding: 2px; color: #4a7cff;");
+    recipeTitleRow->addWidget(loadBtn);
+    connect(loadBtn, &QPushButton::clicked, this, &MainWindow::onLoadRecipe);
 
     centerLayout->addLayout(recipeTitleRow);
 
-    m_recipeList = new QListWidget();
-    m_recipeList->setDragDropMode(QAbstractItemView::InternalMove);
-    m_recipeList->setStyleSheet(
-        "QListWidget { background:#0a0514; border:1px dashed #2a2270; border-radius:4px; }"
-        "QListWidget::item { background:transparent; }"
-    );
-    centerLayout->addWidget(m_recipeList);
+    // Recipe List View with Model + Delegate
+    m_recipeView = new QListView();
+    m_recipeView->setModel(m_recipeModel);
+    m_recipeDelegate = new RecipeDelegate(this);
+    m_recipeView->setItemDelegate(m_recipeDelegate);
+    m_recipeView->setDragDropMode(QAbstractItemView::InternalMove);
+    m_recipeView->setDefaultDropAction(Qt::MoveAction);
+    m_recipeView->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_recipeView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    centerLayout->addWidget(m_recipeView);
 
-    // Template Selector row
+    connect(m_recipeDelegate, &RecipeDelegate::deleteClicked, this, &MainWindow::onRecipeCardDelete);
+    connect(m_recipeDelegate, &RecipeDelegate::toggleEnabledClicked, this, &MainWindow::onRecipeCardToggleEnabled);
+    connect(m_recipeDelegate, &RecipeDelegate::moveUpClicked, this, &MainWindow::onRecipeCardMoveUp);
+    connect(m_recipeDelegate, &RecipeDelegate::moveDownClicked, this, &MainWindow::onRecipeCardMoveDown);
+    connect(m_recipeView->selectionModel(), &QItemSelectionModel::currentRowChanged,
+            this, [this](const QModelIndex &idx, const QModelIndex &) {
+        updateSettingsPanel(idx.isValid() ? idx.row() : -1);
+    });
+
+    // Template Selector
     QHBoxLayout *tmplRow = new QHBoxLayout();
     QComboBox *tmplCombo = new QComboBox();
     tmplCombo->addItem("PRESET SCENARIOS...");
@@ -404,7 +428,7 @@ void MainWindow::setupUI() {
 
     mainSplitter->addWidget(centerPanel);
 
-    // RIGHT PANEL: Settings/Parameters panel for selected operation
+    // RIGHT PANEL: Step Parameters
     QWidget *rightPanel = new QWidget();
     QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(0, 0, 0, 0);
@@ -420,7 +444,7 @@ void MainWindow::setupUI() {
     m_settingsContainer->setAutoFillBackground(true);
     m_settingsLayout = new QVBoxLayout(m_settingsContainer);
     m_settingsLayout->setContentsMargins(4, 4, 4, 4);
-    
+
     QScrollArea *scroll = new QScrollArea();
     scroll->setWidgetResizable(true);
     scroll->setWidget(m_settingsContainer);
@@ -432,16 +456,16 @@ void MainWindow::setupUI() {
     );
     rightLayout->addWidget(scroll);
 
-    // Scripting Macro compiler console at bottom right
+    // Macro Editor
     QGroupBox *macroGroup = new QGroupBox("Macro Editor");
     QVBoxLayout *macroLayout = new QVBoxLayout(macroGroup);
     macroLayout->setContentsMargins(8, 8, 8, 8);
     macroLayout->setSpacing(4);
-    
+
     QLineEdit *macroInput = new QLineEdit();
     macroInput->setPlaceholderText("base64() | rot13() | sha256()");
     macroLayout->addWidget(macroInput);
-    
+
     QPushButton *applyMacroBtn = new QPushButton("APPLY MACRO CHAIN");
     applyMacroBtn->setStyleSheet("font-size: 10px; font-weight: bold;");
     macroLayout->addWidget(applyMacroBtn);
@@ -449,29 +473,26 @@ void MainWindow::setupUI() {
 
     connect(applyMacroBtn, &QPushButton::clicked, this, [this, macroInput]() {
         std::string err;
-        if (m_engine.parseMacroScript(macroInput->text().toStdString(), err)) {
-            updateRecipeCanvas();
-            updateSettingsPanel(m_recipeList->currentRow());
-            onRunRecipe();
+        if (m_engine.parseMacroScript(macroInput->text().toStdString(), m_recipeModel, err)) {
+            m_undoStack->clear();
+            updateSettingsPanel(0);
+            runRecipeOnSteps();
         } else {
             QMessageBox::warning(this, "Macro Compile Error", QString::fromStdString(err));
         }
     });
 
     mainSplitter->addWidget(rightPanel);
-
-    // Set widths ratios
-    mainSplitter->setStretchFactor(0, 2); // Left Tree
-    mainSplitter->setStretchFactor(1, 3); // Center Canvas
-    mainSplitter->setStretchFactor(2, 2); // Right Settings
+    mainSplitter->setStretchFactor(0, 2);
+    mainSplitter->setStretchFactor(1, 3);
+    mainSplitter->setStretchFactor(2, 2);
     mainLayout->addWidget(mainSplitter, 3);
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // 3. BOTTOM SPLITTER (Dual Input/Output layout + Visual charts)
-    // ─────────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // 3. BOTTOM SPLITTER
+    // ─────────────────────────────────────────────────────────────────────
     QSplitter *ioSplitter = new QSplitter(Qt::Horizontal, this);
 
-    // INPUT BOX
     QWidget *inputPanel = new QWidget();
     QVBoxLayout *inputLayout = new QVBoxLayout(inputPanel);
     inputLayout->setContentsMargins(0, 0, 0, 0);
@@ -485,7 +506,6 @@ void MainWindow::setupUI() {
     m_inputEdit->setMinimumHeight(150);
     inputLayout->addWidget(m_inputEdit);
 
-    // Input File Progress Panel
     m_fileUploadFrame = new QFrame();
     m_fileUploadFrame->setFrameShape(QFrame::StyledPanel);
     m_fileUploadFrame->setVisible(false);
@@ -501,12 +521,24 @@ void MainWindow::setupUI() {
     fileLayout->addWidget(m_fileProgress);
     fileLayout->addWidget(clearFileBtn);
     inputLayout->addWidget(m_fileUploadFrame);
-    
+
+    m_miniMap = new DataMiniMap(this);
+    m_miniMap->setVisible(false);
+    inputLayout->addWidget(m_miniMap);
+    connect(m_miniMap, &DataMiniMap::positionClicked, this, [this](double frac) {
+        if (!m_rawInput.empty()) {
+            size_t pos = frac * m_rawInput.size();
+            m_inputEdit->setFocus();
+            QTextCursor cursor = m_inputEdit->textCursor();
+            cursor.setPosition(std::min((int)pos, (int)m_inputEdit->toPlainText().size()));
+            m_inputEdit->setTextCursor(cursor);
+            m_inputEdit->ensureCursorVisible();
+        }
+    });
     connect(clearFileBtn, &QPushButton::clicked, this, &MainWindow::onClearFile);
 
     ioSplitter->addWidget(inputPanel);
 
-    // OUTPUT BOX (Format tabs + analysis plots)
     QWidget *outputPanel = new QWidget();
     QVBoxLayout *outputLayout = new QVBoxLayout(outputPanel);
     outputLayout->setContentsMargins(0, 0, 0, 0);
@@ -517,7 +549,7 @@ void MainWindow::setupUI() {
     outLabel->setStyleSheet("font-weight: bold; color: #00cc88;");
     outHeaderRow->addWidget(outLabel);
     outHeaderRow->addStretch();
-    
+
     QPushButton *copyBtn = new QPushButton("COPY");
     copyBtn->setFixedWidth(60);
     copyBtn->setStyleSheet("font-size: 10px; padding: 4px;");
@@ -533,29 +565,32 @@ void MainWindow::setupUI() {
     outputLayout->addLayout(outHeaderRow);
 
     m_outputTabs = new QTabWidget();
-    
-    // Tab 1: Formatted text rendering
-    m_outputText = new QPlainTextEdit();
+
+    m_outputText = new QTextEdit();
     m_outputText->setReadOnly(true);
     m_outputText->setMinimumHeight(150);
+    m_outputText->setStyleSheet(
+        "QTextEdit { background: #120a20; color: #e0e0f0; border: none;"
+        "  font-family: 'Courier New', monospace; font-size: 12px; padding: 8px; }"
+    );
     m_outputTabs->addTab(m_outputText, "FORMATTED");
 
-    // Tab 2: Byte breakdown
     m_outputByteBreakdown = new QPlainTextEdit();
     m_outputByteBreakdown->setReadOnly(true);
     m_outputTabs->addTab(m_outputByteBreakdown, "BYTE BREAKDOWN");
 
-    // Tab 3: Diff Compare
     m_outputDiff = new QPlainTextEdit();
     m_outputDiff->setReadOnly(true);
     m_outputTabs->addTab(m_outputDiff, "DIFF COMPARISON");
 
-    // Tab 4: Cryptanalysis Plots
+    m_hexDiff = new HexDiffViewer(this);
+    m_outputTabs->addTab(m_hexDiff, "HEX DIFF");
+
     QWidget *plotsTab = new QWidget();
     QHBoxLayout *plotsLayout = new QHBoxLayout(plotsTab);
     plotsLayout->setContentsMargins(4, 4, 4, 4);
     plotsLayout->setSpacing(6);
-    
+
     m_histogram = new FrequencyHistogram(this);
     plotsLayout->addWidget(m_histogram, 2);
 
@@ -571,10 +606,22 @@ void MainWindow::setupUI() {
 
     m_encodingWheel = new EncodingWheel(this);
     plotsLayout->addWidget(m_encodingWheel, 1);
-    
+
     m_outputTabs->addTab(plotsTab, "ANALYSIS PLOTS");
 
-    // Tab 5: CTF Toolkit Search Helper
+    QWidget *periodTab = new QWidget();
+    QHBoxLayout *periodLayout = new QHBoxLayout(periodTab);
+    periodLayout->setContentsMargins(4, 4, 4, 4);
+    periodLayout->setSpacing(6);
+    m_autocorrGraph = new AutocorrelationGraph(this);
+    m_ngramHeatmap = new NGramHeatmap(this);
+    periodLayout->addWidget(m_autocorrGraph, 2);
+    periodLayout->addWidget(m_ngramHeatmap, 1);
+    m_outputTabs->addTab(periodTab, "PERIODICITY");
+
+    m_blockViz = new BlockCipherModeViz(this);
+    m_outputTabs->addTab(m_blockViz, "BLOCK MODES");
+
     QWidget *ctfTab = new QWidget();
     QHBoxLayout *ctfLayout = new QHBoxLayout(ctfTab);
     ctfLayout->setContentsMargins(6, 6, 6, 6);
@@ -602,7 +649,7 @@ void MainWindow::setupUI() {
     ctfLeft->addWidget(tlsAttackBtn);
 
     ctfLayout->addWidget(ctfGroup, 2);
-    
+
     QGroupBox *ctfResGroup = new QGroupBox("Identified Candidates");
     QVBoxLayout *ctfRight = new QVBoxLayout(ctfResGroup);
     m_ctfResults = new QListWidget();
@@ -622,11 +669,10 @@ void MainWindow::setupUI() {
 
     setCentralWidget(central);
 
-    // Signals Connects
+    // Signal Connections
     connect(m_inputEdit, &QPlainTextEdit::textChanged, this, &MainWindow::onInputTextChanged);
     connect(m_inputEdit, &DropEdit::fileDropped, this, &MainWindow::onFileLoaded);
     connect(m_librarySearch, &QLineEdit::textChanged, this, [this](const QString &text) {
-        // filter operations tree
         for (int i = 0; i < m_opLibrary->topLevelItemCount(); ++i) {
             QTreeWidgetItem *cat = m_opLibrary->topLevelItem(i);
             int visibleChildCount = 0;
@@ -642,106 +688,81 @@ void MainWindow::setupUI() {
             cat->setHidden(visibleChildCount == 0 && !text.isEmpty());
         }
     });
-
     connect(m_opLibrary, &QTreeWidget::itemDoubleClicked, this, &MainWindow::onAddOperation);
-    connect(m_recipeList, &QListWidget::itemSelectionChanged, this, &MainWindow::onRecipeItemSelectionChanged);
     connect(m_encodingWheel, SIGNAL(baseSelected(int)), this, SLOT(onWheelBaseSelected(int)));
     connect(bruteCtfBtn, &QPushButton::clicked, this, &MainWindow::onRunCtfSearch);
     connect(tlsAttackBtn, &QPushButton::clicked, this, &MainWindow::onRunTlsAttack);
 
-    // Setup initial empty recipe layout
     updateRecipeCanvas();
+
+    // Command Palette (Ctrl+P)
+    CommandPalette *palette = new CommandPalette(this);
+    palette->hide();
+    new QShortcut(QKeySequence("Ctrl+P"), this, [this, palette]() {
+        palette->showPalette();
+    });
+    connect(palette, &CommandPalette::operationSelected, this, [this](const QString &name) {
+        RecipeStep step;
+        step.operation_name = name.toStdString();
+        step.enabled = true;
+        m_undoStack->push(new AddStepCommand(m_recipeModel, step));
+        updateSettingsPanel(m_recipeModel->stepCount() - 1);
+        runRecipeOnSteps();
+        ToastWidget::show(this, "Added: " + name, ToastWidget::Success, 2000);
+    });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Recipe management signals / slots
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Recipe management ──────────────────────────────────────────────────
 
 void MainWindow::onAddOperation(QTreeWidgetItem *item, int column) {
     Q_UNUSED(column);
-    if (item->childCount() > 0) return; // ignore headers
-    
-    pushUndo();
-    m_engine.addStep(item->text(0).toStdString());
-    updateRecipeCanvas();
-
-    // Select the newly added step
-    m_recipeList->setCurrentRow(m_recipeList->count() - 1);
-    
-    onRunRecipe();
+    if (item->childCount() > 0) return;
+    RecipeStep step;
+    step.operation_name = item->text(0).toStdString();
+    step.enabled = true;
+    m_undoStack->push(new AddStepCommand(m_recipeModel, step));
+    int lastRow = m_recipeModel->stepCount() - 1;
+    m_recipeView->setCurrentIndex(m_recipeModel->index(lastRow));
+    updateSettingsPanel(lastRow);
+    runRecipeOnSteps();
 }
 
 void MainWindow::updateRecipeCanvas() {
-    m_recipeList->clear();
-    const auto &steps = m_engine.getSteps();
-    
-    for (size_t i = 0; i < steps.size(); ++i) {
-        QListWidgetItem *listItem = new QListWidgetItem(m_recipeList);
-        // Size hint for card heights
-        listItem->setSizeHint(QSize(100, 36));
-
-        RecipeCardWidget *card = new RecipeCardWidget(
-            QString::fromStdString(steps[i].operation_name),
-            (int)i,
-            m_recipeList
-        );
-        card->setEnabledState(steps[i].enabled);
-        card->setStatus(!steps[i].has_error, QString::fromStdString(steps[i].error_message));
-
-        m_recipeList->setItemWidget(listItem, card);
-
-        // connects inside card
-        connect(card, &RecipeCardWidget::deleteClicked, this, &MainWindow::onRecipeCardDelete);
-        connect(card, &RecipeCardWidget::toggleEnabledClicked, this, &MainWindow::onRecipeCardToggleEnabled);
-        connect(card, &RecipeCardWidget::moveUpClicked, this, &MainWindow::onRecipeCardMoveUp);
-        connect(card, &RecipeCardWidget::moveDownClicked, this, &MainWindow::onRecipeCardMoveDown);
-    }
-}
-
-void MainWindow::onRecipeItemSelectionChanged() {
-    int idx = m_recipeList->currentRow();
-    updateSettingsPanel(idx);
+    // Model-driven: the view is already connected to the model.
+    // Ensure the selection model is connected.
 }
 
 void MainWindow::onRecipeCardDelete(int index) {
-    pushUndo();
-    m_engine.removeStep(index);
-    updateRecipeCanvas();
-    updateSettingsPanel(m_recipeList->currentRow());
-    onRunRecipe();
+    if (index < 0 || index >= m_recipeModel->stepCount()) return;
+    m_undoStack->push(new RemoveStepCommand(m_recipeModel, index));
+    int newRow = qMin(index, m_recipeModel->stepCount() - 1);
+    if (newRow >= 0)
+        m_recipeView->setCurrentIndex(m_recipeModel->index(newRow));
+    updateSettingsPanel(newRow);
+    runRecipeOnSteps();
 }
 
-void MainWindow::onRecipeCardToggleEnabled(int index, bool enabled) {
-    pushUndo();
-    m_engine.setStepEnabled(index, enabled);
-    updateRecipeCanvas();
-    updateSettingsPanel(m_recipeList->currentRow());
-    onRunRecipe();
+void MainWindow::onRecipeCardToggleEnabled(int index) {
+    if (index < 0 || index >= m_recipeModel->stepCount()) return;
+    m_undoStack->push(new ToggleStepCommand(m_recipeModel, index));
+    runRecipeOnSteps();
 }
 
 void MainWindow::onRecipeCardMoveUp(int index) {
-    if (index > 0) {
-        pushUndo();
-        m_engine.swapSteps(index, index - 1);
-        updateRecipeCanvas();
-        m_recipeList->setCurrentRow(index - 1);
-        onRunRecipe();
-    }
+    if (index <= 0 || index >= m_recipeModel->stepCount()) return;
+    m_undoStack->push(new MoveStepCommand(m_recipeModel, index, index - 1));
+    m_recipeView->setCurrentIndex(m_recipeModel->index(index - 1));
+    runRecipeOnSteps();
 }
 
 void MainWindow::onRecipeCardMoveDown(int index) {
-    if (index >= 0 && index < (m_recipeList->count() - 1)) {
-        pushUndo();
-        m_engine.swapSteps(index, index + 1);
-        updateRecipeCanvas();
-        m_recipeList->setCurrentRow(index + 1);
-        onRunRecipe();
-    }
+    if (index < 0 || index >= m_recipeModel->stepCount() - 1) return;
+    m_undoStack->push(new MoveStepCommand(m_recipeModel, index, index + 1));
+    m_recipeView->setCurrentIndex(m_recipeModel->index(index + 1));
+    runRecipeOnSteps();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dynamic Settings Form Generation
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Dynamic Settings Form ──────────────────────────────────────────────
 
 void MainWindow::updateSettingsPanel(int stepIndex) {
     delete m_settingsLayout;
@@ -749,14 +770,14 @@ void MainWindow::updateSettingsPanel(int stepIndex) {
     m_settingsLayout = new QVBoxLayout(m_settingsContainer);
     m_settingsLayout->setContentsMargins(4, 4, 4, 4);
 
-    if (stepIndex < 0 || stepIndex >= (int)m_engine.getSteps().size()) {
+    if (stepIndex < 0 || stepIndex >= m_recipeModel->stepCount()) {
         QLabel *empty = new QLabel("Select an operation step to edit parameters.");
         empty->setStyleSheet("color: #8880a0; font-style: italic;");
         m_settingsLayout->addWidget(empty);
         return;
     }
 
-    RecipeStep &step = m_engine.getSteps()[stepIndex];
+    RecipeStep step = m_recipeModel->stepAt(stepIndex);
     std::string op = step.operation_name;
 
     QFormLayout *form = new QFormLayout();
@@ -774,9 +795,13 @@ void MainWindow::updateSettingsPanel(int stepIndex) {
         form->addRow(label, edit);
         QLabel *lb = qobject_cast<QLabel*>(form->labelForField(edit));
         if (lb) lb->setStyleSheet("font-weight:bold; color:#8880a0; font-size:10px;");
-        connect(edit, &QLineEdit::textChanged, this, [this, callback, edit]() {
-            pushUndo();
-            callback(edit->text().toStdString());
+        connect(edit, &QLineEdit::textChanged, this, [this, stepIndex, callback](const QString &text) {
+            auto oldState = m_recipeModel->stepAt(stepIndex);
+            auto newState = oldState;
+            callback(newState, text.toStdString());
+            auto cmd = new ModifyStepCommand(m_recipeModel, stepIndex, oldState, newState);
+            m_undoStack->push(cmd);
+            m_recipeModel->setStepParam(stepIndex, newState.params);
             onParameterChanged();
         });
     };
@@ -800,9 +825,13 @@ void MainWindow::updateSettingsPanel(int stepIndex) {
         QLabel *lb = qobject_cast<QLabel*>(form->labelForField(spin));
         if (lb) lb->setStyleSheet("font-weight:bold; color:#8880a0; font-size:10px;");
         connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::onParameterChanged);
-        connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this, callback](int val) {
-            pushUndo();
-            callback(val);
+        connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this, stepIndex, callback](int val) {
+            auto oldState = m_recipeModel->stepAt(stepIndex);
+            auto newState = oldState;
+            callback(newState, val);
+            auto cmd = new ModifyStepCommand(m_recipeModel, stepIndex, oldState, newState);
+            m_undoStack->push(cmd);
+            m_recipeModel->setStepParam(stepIndex, newState.params);
         });
     };
 
@@ -817,86 +846,85 @@ void MainWindow::updateSettingsPanel(int stepIndex) {
         );
         form->addRow("", chk);
         connect(chk, &QCheckBox::clicked, this, &MainWindow::onParameterChanged);
-        connect(chk, &QCheckBox::clicked, this, [this, callback](bool c) {
-            pushUndo();
-            callback(c);
+        connect(chk, &QCheckBox::clicked, this, [this, stepIndex, callback](bool c) {
+            auto oldState = m_recipeModel->stepAt(stepIndex);
+            auto newState = oldState;
+            callback(newState, c);
+            auto cmd = new ModifyStepCommand(m_recipeModel, stepIndex, oldState, newState);
+            m_undoStack->push(cmd);
+            m_recipeModel->setStepParam(stepIndex, newState.params);
         });
     };
-    // Description header label
+
     QLabel *headerLabel = new QLabel(QString::fromStdString(op).toUpper());
     headerLabel->setStyleSheet("font-weight: bold; color: #6b9cff; margin-bottom: 6px;");
     m_settingsLayout->addWidget(headerLabel);
 
-    // Populate controls matching cipher types
     if (op == "Caesar") {
-        addSpinBox("Shift:", -25, 25, step.params.param1, [&step](int v) { step.params.param1 = v; });
+        addSpinBox("Shift:", -25, 25, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
     } else if (op == "Affine") {
-        addSpinBox("a (coprime 26):", 1, 25, step.params.param1, [&step](int v) { step.params.param1 = v; });
-        addSpinBox("b:", 0, 25, step.params.param2, [&step](int v) { step.params.param2 = v; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addSpinBox("a (coprime 26):", 1, 25, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addSpinBox("b:", 0, 25, step.params.param2, [](RecipeStep &s, int v) { s.params.param2 = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Vigenere" || op == "Playfair" || op == "Keyword" || op == "Autokey" || op == "Beaufort") {
-        addLineEdit("Key:", step.params.key, [&step](std::string s) { step.params.key = s; });
-        if (op != "Beaufort") {
-            addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
-        }
+        addLineEdit("Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        if (op != "Beaufort")
+            addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Substitution") {
-        addLineEdit("Alphabet (26 chars):", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addLineEdit("Alphabet (26 chars):", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Railfence") {
-        addSpinBox("Rails:", 2, 20, step.params.param1, [&step](int v) { step.params.param1 = v; });
-        addSpinBox("Offset:", 0, 20, step.params.param2, [&step](int v) { step.params.param2 = v; });
+        addSpinBox("Rails:", 2, 20, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addSpinBox("Offset:", 0, 20, step.params.param2, [](RecipeStep &s, int v) { s.params.param2 = v; });
     } else if (op == "Columnar") {
-        addLineEdit("Key:", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addLineEdit("Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "XOR (hex key)" || op == "RC4") {
-        addLineEdit("Key:", step.params.key, [&step](std::string s) { step.params.key = s; });
+        addLineEdit("Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
     } else if (op == "Blowfish" || op == "DES") {
-        addLineEdit("Key:", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addLineEdit("Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Scytale") {
-        addSpinBox("Columns:", 2, 20, step.params.param1, [&step](int v) { step.params.param1 = v; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addSpinBox("Columns:", 2, 20, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Trifid") {
-        addLineEdit("Key Grid:", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addSpinBox("Period:", 2, 20, step.params.param1, [&step](int v) { step.params.param1 = v; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addLineEdit("Key Grid:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addSpinBox("Period:", 2, 20, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Four-Square") {
-        addLineEdit("Keys:", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addLineEdit("Keys:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Keyboard Shift") {
-        addSpinBox("Shift:", -10, 10, step.params.param1, [&step](int v) { step.params.param1 = v; });
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addSpinBox("Shift:", -10, 10, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     }
-    // ── Modern Ciphers ──
     else if (op == "AES-ECB" || op == "AES-CBC" || op == "AES-CTR") {
-        addLineEdit("Key (16 or 32 bytes):", step.params.key, [&step](std::string s) { step.params.key = s; });
-        if (op != "AES-ECB") {
-            addLineEdit("IV (16 bytes):", step.params.iv, [&step](std::string s) { step.params.iv = s; });
-        }
-        addCheckbox("Decrypt instead", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addLineEdit("Key (16 or 32 bytes):", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        if (op != "AES-ECB")
+            addLineEdit("IV (16 bytes):", step.params.iv, [](RecipeStep &s, const std::string &v) { s.params.iv = v; });
+        addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "ChaCha20") {
-        addLineEdit("Key (32 bytes):", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addLineEdit("Nonce (12 bytes):", step.params.iv, [&step](std::string s) { step.params.iv = s; });
-        addSpinBox("Counter (starts 0):", 0, 999999, step.params.param1, [&step](int v) { step.params.param1 = v; });
+        addLineEdit("Key (32 bytes):", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addLineEdit("Nonce (12 bytes):", step.params.iv, [](RecipeStep &s, const std::string &v) { s.params.iv = v; });
+        addSpinBox("Counter (starts 0):", 0, 999999, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
     } else if (op == "Poly1305" || op == "HMAC-SHA256" || op == "HMAC-SHA512") {
-        addLineEdit("Secret Key:", step.params.key, [&step](std::string s) { step.params.key = s; });
+        addLineEdit("Secret Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
     } else if (op == "PBKDF2-SHA256" || op == "Argon2id") {
-        addLineEdit("Salt:", step.params.iv, [&step](std::string s) { step.params.iv = s; });
-        addSpinBox("Iterations:", 1, 5000, step.params.param1, [&step](int v) { step.params.param1 = v; });
-        addSpinBox("Memory Size (KB):", 8, 65536, step.params.param2, [&step](int v) { step.params.param2 = v; });
+        addLineEdit("Salt:", step.params.iv, [](RecipeStep &s, const std::string &v) { s.params.iv = v; });
+        addSpinBox("Iterations:", 1, 5000, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addSpinBox("Memory Size (KB):", 8, 65536, step.params.param2, [](RecipeStep &s, int v) { s.params.param2 = v; });
     } else if (op == "BLAKE2b" || op == "BLAKE2s") {
-        addLineEdit("Key (Optional):", step.params.key, [&step](std::string s) { step.params.key = s; });
+        addLineEdit("Key (Optional):", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
     } else if (op == "JWT Sign") {
-        addLineEdit("Secret Key:", step.params.key, [&step](std::string s) { step.params.key = s; });
-        addLineEdit("Header JSON (Optional):", step.params.iv, [&step](std::string s) { step.params.iv = s; });
+        addLineEdit("Secret Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
+        addLineEdit("Header JSON (Optional):", step.params.iv, [](RecipeStep &s, const std::string &v) { s.params.iv = v; });
     } else if (op == "JWT Verify") {
-        addLineEdit("Secret Key (Optional):", step.params.key, [&step](std::string s) { step.params.key = s; });
+        addLineEdit("Secret Key (Optional):", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
     } else if (op == "LSB Embed") {
-        addLineEdit("Secret Text to Hide:", step.params.key, [&step](std::string s) { step.params.key = s; });
+        addLineEdit("Secret Text to Hide:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
     } else if (op == "Morse" || op == "Baconian" || op == "Binary" || op == "Octal" || op == "Base64" || op == "Hex" || op == "URL Encode") {
-        addCheckbox("Decrypt/Decode", !step.params.encrypt, [&step](bool c) { step.params.encrypt = !c; });
+        addCheckbox("Decrypt/Decode", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else {
-        // No parameters header
         QLabel *noParams = new QLabel("Operation has no configurable parameters.");
         noParams->setStyleSheet("color: #8880a0; font-style: italic;");
         form->addRow("", noParams);
@@ -907,29 +935,66 @@ void MainWindow::updateSettingsPanel(int stepIndex) {
 }
 
 void MainWindow::onParameterChanged() {
-    if (m_autoRunCheck->isChecked()) {
-        onRunRecipe();
+    if (m_autoRunCheck->isChecked())
+        runRecipeOnSteps();
+}
+
+// ── Execution ──────────────────────────────────────────────────────────
+
+void MainWindow::runRecipeOnSteps() {
+    if (m_engine.isThreadingEnabled() && m_engine.isRunningAsync())
+        return;
+
+    QSettings s("Obscuron", "CryptoSuite");
+    bool useThreading = s.value("performance/multiThread", false).toBool();
+    m_engine.setThreadingEnabled(useThreading);
+
+    if (useThreading) {
+        setUIControlsEnabled(false);
+        m_cancelBtn->setVisible(true);
+        disconnect(m_asyncFinishConn);
+        m_asyncFinishConn = connect(&m_engine, &RecipeEngine::executionFinished,
+            this, &MainWindow::onAsyncExecutionFinished);
+        m_engine.runAsync(m_rawInput, m_recipeModel->steps());
+    } else {
+        std::vector<RecipeStep> steps = m_recipeModel->steps();
+        std::string out = m_engine.run(m_rawInput, steps);
+        for (size_t i = 0; i < steps.size(); ++i) {
+            const auto &s = steps[i];
+            m_recipeModel->setStepResult(i, s.intermediate_output, s.has_error,
+                                          s.error_message, s.execution_time_ms);
+        }
+        applyPipelineResults(out);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Execution and visual updates
-// ─────────────────────────────────────────────────────────────────────────────
-
 void MainWindow::onRunRecipe() {
-    std::string out = m_engine.run(m_rawInput);
-    
-    // Update statuses of recipe cards in canvas
-    for (int i = 0; i < m_recipeList->count(); ++i) {
-        QListWidgetItem *item = m_recipeList->item(i);
-        RecipeCardWidget *card = qobject_cast<RecipeCardWidget*>(m_recipeList->itemWidget(item));
-        if (card) {
-            const auto &step = m_engine.getSteps()[i];
-            card->setStatus(!step.has_error, QString::fromStdString(step.error_message));
-        }
-    }
+    runRecipeOnSteps();
+}
 
-    // Update Top bar metrics
+void MainWindow::onAsyncExecutionFinished(const std::string &out, const RecipeMetrics &) {
+    m_engine.syncResultsToModel(m_recipeModel);
+    m_cancelBtn->setVisible(false);
+    setUIControlsEnabled(true);
+    applyPipelineResults(out);
+}
+
+void MainWindow::onCancelAsync() {
+    m_engine.cancelAsync();
+    m_cancelBtn->setVisible(false);
+    setUIControlsEnabled(true);
+}
+
+void MainWindow::setUIControlsEnabled(bool enabled) {
+    m_recipeView->setEnabled(enabled);
+    m_opLibrary->setEnabled(enabled);
+    m_inputEdit->setEnabled(enabled);
+    m_undoBtn->setEnabled(enabled && m_undoStack->canUndo());
+    m_redoBtn->setEnabled(enabled && m_undoStack->canRedo());
+}
+
+void MainWindow::applyPipelineResults(const std::string &out) {
+    // Update metrics
     const RecipeMetrics &m = m_engine.getLatestMetrics();
     QString speed = QString("%1").arg(m.throughput_mbs, 0, 'f', 2);
     m_metricsLabel->setText(
@@ -939,18 +1004,77 @@ void MainWindow::onRunRecipe() {
             .arg(m.memory_used_bytes)
     );
 
-    // Display formatted outputs
     displayOutputFormat(out);
 
-    // Update analysis custom plots
     m_histogram->setData(out);
     m_heatmap->setData(out);
     m_entropyGraph->setData(out);
     m_encodingWheel->setValue(out);
+    m_autocorrGraph->setData(out);
+    m_ngramHeatmap->setData(out);
+    m_hexDiff->setData(m_rawInput, out);
+    m_blockViz->setData(out);
+
+    if (m_rawInput.size() > 1024) {
+        m_miniMap->setData(m_rawInput);
+        m_miniMap->setVisible(true);
+    } else {
+        m_miniMap->setVisible(false);
+    }
+}
+
+static QString markdownToHtml(const std::string &md) {
+    QString html;
+    std::istringstream stream(md);
+    std::string line;
+    bool inCodeBlock = false;
+    while (std::getline(stream, line)) {
+        if (line.rfind("```", 0) == 0) {
+            if (inCodeBlock) {
+                html += "</pre></code>";
+                inCodeBlock = false;
+            } else {
+                html += "<code><pre style='background:#0a0514; padding:8px; border-radius:4px;"
+                        " font-family:\"Courier New\",monospace; font-size:11px;'>";
+                inCodeBlock = true;
+            }
+            continue;
+        }
+        if (inCodeBlock) {
+            html += line.empty() ? "<br>" : QString::fromStdString(line) + "\n";
+            continue;
+        }
+        if (line.rfind("# ", 0) == 0) {
+            QString t = QString::fromStdString(line.substr(2));
+            html += "<h2 style='color:#4a7cff; font-family:\"Courier New\",monospace;'>" + t + "</h2>";
+        } else if (line.rfind("## ", 0) == 0) {
+            QString t = QString::fromStdString(line.substr(3));
+            html += "<h3 style='color:#6b9cff; font-family:\"Courier New\",monospace;'>" + t + "</h3>";
+        } else if (line.rfind("---", 0) == 0 || line.rfind("___", 0) == 0) {
+            html += "<hr style='border:1px solid #1e1850;'>";
+        } else if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
+            html += "<li style='color:#e0e0f0;'>" + QString::fromStdString(line.substr(2)) + "</li>";
+        } else if (line.rfind("|", 0) == 0) {
+            QStringList cells = QString::fromStdString(line).split('|');
+            html += "<tr>";
+            for (int ci = 1; ci < cells.size() - 1; ++ci)
+                html += "<td style='padding:2px 8px; border:1px solid #1e1850;'>" + cells[ci].trimmed() + "</td>";
+            html += "</tr>";
+        } else if (!line.empty()) {
+            QString escaped = QString::fromStdString(line);
+            escaped.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+            escaped.replace(QRegularExpression("\\*\\*(.+?)\\*\\*"), "<b>\\1</b>");
+            escaped.replace(QRegularExpression("\\*(.+?)\\*"), "<i>\\1</i>");
+            html += "<p style='margin:2px 0; color:#e0e0f0;'>" + escaped + "</p>";
+        } else {
+            html += "<br>";
+        }
+    }
+    if (inCodeBlock) html += "</pre></code>";
+    return "<div style='font-family:\"Courier New\",monospace; font-size:12px;'>" + html + "</div>";
 }
 
 void MainWindow::displayOutputFormat(const std::string &output) {
-    // Tab 1: Formatted Output (printable validation)
     bool printable = true;
     for (unsigned char c : output) {
         if (c < 32 && c != '\n' && c != '\r' && c != '\t') {
@@ -959,9 +1083,15 @@ void MainWindow::displayOutputFormat(const std::string &output) {
     }
 
     if (printable) {
-        m_outputText->setPlainText(QString::fromStdString(output));
+        std::string s(output);
+        bool isMarkdown = (s.find("```") != std::string::npos) ||
+                          (s.find("\n#") != std::string::npos) ||
+                          (s.find("\n|") != std::string::npos);
+        if (isMarkdown)
+            m_outputText->setHtml(markdownToHtml(s));
+        else
+            m_outputText->setPlainText(QString::fromStdString(s));
     } else {
-        // Raw bytes fallback representation
         std::stringstream ss;
         ss << "[RAW BINARY DATA (" << output.size() << " bytes)]\n\n";
         for (size_t i = 0; i < output.size(); ++i) {
@@ -971,7 +1101,6 @@ void MainWindow::displayOutputFormat(const std::string &output) {
         m_outputText->setPlainText(QString::fromStdString(ss.str()));
     }
 
-    // Tab 2: Byte breakdown list
     std::stringstream bb;
     bb << "Offset    Hex  Dec  Char\n";
     bb << "────────────────────────\n";
@@ -980,8 +1109,6 @@ void MainWindow::displayOutputFormat(const std::string &output) {
         bb << "0x" << std::setfill('0') << std::setw(6) << std::hex << i << "  ";
         bb << std::setw(2) << (int)c << "  ";
         bb << std::setfill(' ') << std::setw(3) << std::dec << (int)c << "  ";
-        
-        // Print character label or control sequence
         if (c == '\n') bb << "<LF>";
         else if (c == '\r') bb << "<CR>";
         else if (c == '\t') bb << "<TAB>";
@@ -992,16 +1119,11 @@ void MainWindow::displayOutputFormat(const std::string &output) {
     if (output.size() > 1000) bb << "... truncated ...";
     m_outputByteBreakdown->setPlainText(QString::fromStdString(bb.str()));
 
-    // Tab 3: Diff Comparison (Input vs Output text)
     std::stringstream df;
     df << "=== INPUT DATA ===\n" << m_rawInput << "\n\n";
     df << "=== OUTPUT DATA ===\n" << (printable ? output : "[Raw non-printable bytes]");
     m_outputDiff->setPlainText(QString::fromStdString(df.str()));
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Input & Load updates
-// ─────────────────────────────────────────────────────────────────────────────
 
 void MainWindow::onInputTextChanged() {
     m_rawInput = m_inputEdit->toPlainText().toStdString();
@@ -1010,15 +1132,11 @@ void MainWindow::onInputTextChanged() {
 
 void MainWindow::onFileLoaded(const QString &filePath, const QByteArray &content) {
     m_rawInput = content.toStdString();
-    
-    // Update file details bar
     QFileInfo fi(filePath);
     m_fileNameLabel->setText(QString("Loaded File: %1 (%2 bytes)").arg(fi.fileName()).arg(content.size()));
     m_fileUploadFrame->setVisible(true);
-
     m_inputEdit->setPlainText(QString::fromStdString(m_rawInput.substr(0, std::min((size_t)2000, m_rawInput.size()))));
     m_inputEdit->setPlaceholderText("File loaded. Showing first 2000 chars.");
-
     onParameterChanged();
 }
 
@@ -1037,82 +1155,34 @@ void MainWindow::onCopyOutput() {
 void MainWindow::onExportOutput(const QString &ext) {
     QString path = QFileDialog::getSaveFileName(this, "Export File", "", "*." + ext);
     if (path.isEmpty()) return;
-
     QFile f(path);
     if (f.open(QIODevice::WriteOnly)) {
         std::string raw_out = m_outputText->toPlainText().toStdString();
-        // If file loaded, write actual output data
         f.write(raw_out.data(), raw_out.size());
         f.close();
     }
 }
 
 void MainWindow::onWheelBaseSelected(int radix) {
-    // Add conversion step depending on clicked sector
-    pushUndo();
-    if (radix == 2) m_engine.addStep("Binary");
-    else if (radix == 8) m_engine.addStep("Octal");
-    else if (radix == 16) m_engine.addStep("Hex");
-    else if (radix == 64) m_engine.addStep("Base64");
-    updateRecipeCanvas();
-    updateSettingsPanel(m_recipeList->currentRow());
-    onRunRecipe();
+    RecipeStep step;
+    step.enabled = true;
+    if (radix == 2) step.operation_name = "Binary";
+    else if (radix == 8) step.operation_name = "Octal";
+    else if (radix == 16) step.operation_name = "Hex";
+    else if (radix == 64) step.operation_name = "Base64";
+    else return;
+    m_undoStack->push(new AddStepCommand(m_recipeModel, step));
+    int lastRow = m_recipeModel->stepCount() - 1;
+    m_recipeView->setCurrentIndex(m_recipeModel->index(lastRow));
+    updateSettingsPanel(lastRow);
+    runRecipeOnSteps();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// History (Undo / Redo)
-// ─────────────────────────────────────────────────────────────────────────────
+void MainWindow::onRecipeItemSelectionChanged() {} // handled by QListView selection model
 
-void MainWindow::pushUndo() {
-    if (m_isUndoingOrRedoing) return;
-    std::string json = m_engine.exportToJSON();
-    
-    // Cap undo sizes
-    if (m_undoStack.empty() || m_undoStack.back() != json) {
-        m_undoStack.push_back(json);
-        if (m_undoStack.size() > 100) m_undoStack.erase(m_undoStack.begin());
-        m_redoStack.clear();
-    }
-}
+// ── Undo/Redo replaced by QUndoStack ──────────────────────────────────
 
-void MainWindow::onUndo() {
-    if (m_undoStack.size() < 2) return; // stack 0 is initial, need at least 2 to revert
-    m_isUndoingOrRedoing = true;
-    
-    std::string current = m_undoStack.back();
-    m_redoStack.push_back(current);
-    m_undoStack.pop_back();
-
-    std::string last = m_undoStack.back();
-    std::string err;
-    m_engine.importFromJSON(last, err);
-
-    updateRecipeCanvas();
-    onRunRecipe();
-    
-    m_isUndoingOrRedoing = false;
-}
-
-void MainWindow::onRedo() {
-    if (m_redoStack.empty()) return;
-    m_isUndoingOrRedoing = true;
-
-    std::string next = m_redoStack.back();
-    m_redoStack.pop_back();
-    m_undoStack.push_back(next);
-
-    std::string err;
-    m_engine.importFromJSON(next, err);
-
-    updateRecipeCanvas();
-    onRunRecipe();
-
-    m_isUndoingOrRedoing = false;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Themes, Presets, CTF Search Cracking
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Themes, Presets, CTF ──────────────────────────────────────────────
 
 void MainWindow::onOpenSettings() {
     SettingsDialog dlg(this);
@@ -1128,32 +1198,33 @@ void MainWindow::onThemeChanged(int index) {
 }
 
 void MainWindow::onTemplateSelected(int index) {
-    if (index == 1) { // Argon2id derivation
-        m_engine.clearSteps();
-        m_engine.addStep("Argon2id");
-        m_engine.getSteps()[0].params.iv = "salty_parameter";
-        m_engine.getSteps()[0].params.param1 = 3; // iter
-        m_engine.getSteps()[0].params.param2 = 1024; // mem
-    } else if (index == 2) { // AES CBC pipeline
-        m_engine.clearSteps();
-        m_engine.addStep("Base64");
-        m_engine.getSteps()[0].params.encrypt = false; // decode
-        m_engine.addStep("AES-CBC");
-        m_engine.getSteps()[1].params.key = "1234567890123456";
-        m_engine.getSteps()[1].params.iv = "0000000000000000";
-        m_engine.getSteps()[1].params.encrypt = false; // decrypt
-    } else if (index == 3) { // JWT inspector
-        m_engine.clearSteps();
-        m_engine.addStep("JWT Verify");
-        m_engine.getSteps()[0].params.key = "jwt_signing_key";
-    } else if (index == 4) { // LSB Extract
-        m_engine.clearSteps();
-        m_engine.addStep("LSB Extract");
+    m_recipeModel->clear();
+    m_undoStack->clear();
+
+    if (index == 1) {
+        RecipeStep s1; s1.operation_name = "Argon2id"; s1.enabled = true;
+        s1.params.iv = "salty_parameter"; s1.params.param1 = 3; s1.params.param2 = 1024;
+        m_recipeModel->addStep(s1.operation_name, s1.params);
+    } else if (index == 2) {
+        RecipeStep s1; s1.operation_name = "Base64"; s1.enabled = true;
+        s1.params.encrypt = false;
+        m_recipeModel->addStep(s1.operation_name, s1.params);
+        RecipeStep s2; s2.operation_name = "AES-CBC"; s2.enabled = true;
+        s2.params.key = "1234567890123456"; s2.params.iv = "0000000000000000";
+        s2.params.encrypt = false;
+        m_recipeModel->addStep(s2.operation_name, s2.params);
+    } else if (index == 3) {
+        RecipeStep s1; s1.operation_name = "JWT Verify"; s1.enabled = true;
+        s1.params.key = "jwt_signing_key";
+        m_recipeModel->addStep(s1.operation_name, s1.params);
+    } else if (index == 4) {
+        RecipeStep s1; s1.operation_name = "LSB Extract"; s1.enabled = true;
+        m_recipeModel->addStep(s1.operation_name, s1.params);
     } else {
         return;
     }
-    updateRecipeCanvas();
-    onRunRecipe();
+    updateSettingsPanel(0);
+    runRecipeOnSteps();
 }
 
 void MainWindow::onRunTlsAttack() {
@@ -1171,14 +1242,11 @@ void MainWindow::onRunTlsAttack() {
 void MainWindow::onRunCtfSearch() {
     m_ctfResults->clear();
     std::string pattern = m_ctfFlagRegex->text().toStdString();
-    if (pattern.empty()) {
-        pattern = "flag\\{[a-zA-Z0-9_]+\\}"; // default format
-    }
-
+    if (pattern.empty())
+        pattern = "flag\\{[a-zA-Z0-9_]+\\}";
     runCtfDictionaryBrute(m_rawInput, pattern);
 }
 
-// Search cracking candidates matching flag format
 void MainWindow::runCtfDictionaryBrute(const std::string &input, const std::string &flagFormat) {
     QRegularExpression re(QString::fromStdString(flagFormat));
     int match_count = 0;
@@ -1194,28 +1262,13 @@ void MainWindow::runCtfDictionaryBrute(const std::string &input, const std::stri
         }
     };
 
-    // 1. Caesar Shift Brute force (1-25)
     for (int shift = 1; shift < 26; ++shift) {
         std::string cand;
         custom_rot(input, shift, cand);
         testCandidate(cand, QString("Caesar Shift %1").arg(shift));
     }
-
-    // 2. ROT47 Brute
-    {
-        std::string cand;
-        rot47(input, cand);
-        testCandidate(cand, "ROT47");
-    }
-
-    // 3. Atbash Brute
-    {
-        std::string cand;
-        atbash(input, cand);
-        testCandidate(cand, "Atbash");
-    }
-
-    // 4. Base64 Decode + Caesar Brute
+    { std::string cand; rot47(input, cand); testCandidate(cand, "ROT47"); }
+    { std::string cand; atbash(input, cand); testCandidate(cand, "Atbash"); }
     {
         std::string b64 = base64url_decode(input);
         if (!b64.empty()) {
@@ -1227,13 +1280,10 @@ void MainWindow::runCtfDictionaryBrute(const std::string &input, const std::stri
             }
         }
     }
-
     m_ctfMatchCount->setText(QString("%1 Matches found").arg(match_count));
 }
 
-void MainWindow::onCtfFlagCheck() {
-    // Checked inside CTF run search
-}
+void MainWindow::onCtfFlagCheck() {}
 
 void MainWindow::onDetectCipher() {
     std::string input = m_inputEdit->toPlainText().toStdString();
@@ -1261,7 +1311,6 @@ void MainWindow::onDetectCipher() {
     }
     m_outputText->setPlainText(QString::fromStdString(oss.str()));
     m_outputTabs->setCurrentIndex(0);
-    // Set the decoded text as output if a result exists
     if (!results.empty() && !results[0].decrypted.empty())
         m_outputText->setPlainText(QString::fromStdString(results[0].decrypted));
     if (!results.empty()) {
@@ -1274,19 +1323,106 @@ void MainWindow::onDetectCipher() {
 }
 
 void MainWindow::onApplyMacro() {
-    QMessageBox::information(this, "Macro Scripting", "Not yet implemented");
+    QMessageBox::information(this, "Macro Scripting", "Use the Macro Editor in the right panel.");
 }
 
 void MainWindow::onSaveRecipe() {
-    if (m_recipeList->count() == 0) return;
-    QString path = QFileDialog::getSaveFileName(this, "Save Recipe", "", "JSON (*.json)");
+    QString path = QFileDialog::getSaveFileName(this, "Save Workspace", "",
+        "Obscuron Workspace (*.obscuron);;JSON Recipe (*.json)");
     if (path.isEmpty()) return;
-    QMessageBox::information(this, "Save Recipe", "Saved to: " + path);
+
+    QJsonObject root;
+    root["version"] = 1;
+    root["input"] = QString::fromStdString(m_rawInput);
+    root["recipe"] = QJsonDocument::fromJson(
+        QByteArray::fromStdString(m_recipeModel->exportToJSON())).array();
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        ToastWidget::show(this, "Failed to save: " + file.errorString(), ToastWidget::Error);
+        return;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    file.close();
+    ToastWidget::show(this, "Workspace saved: " + QFileInfo(path).fileName(), ToastWidget::Success);
 }
 
 void MainWindow::onLoadRecipe() {
-    QString path = QFileDialog::getOpenFileName(this, "Load Recipe", "", "JSON (*.json)");
+    QString path = QFileDialog::getOpenFileName(this, "Load Workspace", "",
+        "Obscuron Workspace (*.obscuron);;JSON Recipe (*.json)");
     if (path.isEmpty()) return;
-    // TODO: deserialize and apply recipe
-    QMessageBox::information(this, "Load Recipe", "Loaded: " + path);
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        ToastWidget::show(this, "Failed to load: " + file.errorString(), ToastWidget::Error);
+        return;
+    }
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+    if (doc.isNull()) {
+        ToastWidget::show(this, "Parse error: " + err.errorString(), ToastWidget::Error);
+        return;
+    }
+
+    std::string input;
+    if (doc.isObject()) {
+        QJsonObject root = doc.object();
+        input = root["input"].toString().toStdString();
+        QJsonArray recipe = root["recipe"].toArray();
+        QJsonDocument recipeDoc(recipe);
+        std::string recipeJson = recipeDoc.toJson(QJsonDocument::Compact).toStdString();
+        std::string importErr;
+        if (!m_recipeModel->importFromJSON(recipeJson, importErr)) {
+            ToastWidget::show(this, "Recipe error: " + QString::fromStdString(importErr), ToastWidget::Error);
+            return;
+        }
+    } else if (doc.isArray()) {
+        std::string recipeJson = data.toStdString();
+        std::string importErr;
+        if (!m_recipeModel->importFromJSON(recipeJson, importErr)) {
+            ToastWidget::show(this, "Recipe error: " + QString::fromStdString(importErr), ToastWidget::Error);
+            return;
+        }
+    } else {
+        ToastWidget::show(this, "Invalid workspace format", ToastWidget::Error);
+        return;
+    }
+
+    if (!input.empty()) {
+        m_rawInput = input;
+        m_inputEdit->setPlainText(QString::fromStdString(input));
+    }
+
+    m_undoStack->clear();
+    updateSettingsPanel(0);
+    runRecipeOnSteps();
+    ToastWidget::show(this, "Workspace loaded", ToastWidget::Info);
+}
+
+void MainWindow::onOpenPluginBrowser() {
+    PluginBrowserDialog dialog(&m_pluginLoader, this);
+    connect(&dialog, &PluginBrowserDialog::pluginsChanged,
+            this, &MainWindow::onPluginLibraryChanged);
+    dialog.exec();
+}
+
+void MainWindow::onPluginLibraryChanged() {
+    for (int i = 0; i < m_opLibrary->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *cat = m_opLibrary->topLevelItem(i);
+        if (cat->text(0) == "Plugins") {
+            while (cat->childCount() > 0)
+                delete cat->takeChild(0);
+            for (const auto &op : m_pluginLoader.allPluginOperations()) {
+                QTreeWidgetItem *item = new QTreeWidgetItem(cat);
+                item->setText(0, QString::fromStdString(op));
+                item->setFont(0, QFont("Courier New", 9));
+                item->setForeground(0, QColor("#00cc88"));
+            }
+            cat->setExpanded(true);
+            break;
+        }
+    }
 }

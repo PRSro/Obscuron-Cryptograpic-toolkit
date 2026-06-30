@@ -42,6 +42,9 @@ private:
     QCheckBox *m_autoRunDefault;
     QSpinBox *m_maxOutputLines;
 
+    // Performance tab
+    QCheckBox *m_multiThread;
+
 private slots:
     void onApply();
     void onAccentSliderChanged();

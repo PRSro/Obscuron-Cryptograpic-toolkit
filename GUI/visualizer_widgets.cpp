@@ -2,9 +2,13 @@
 #include "colours.h"
 #include <QPainter>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QPainterPath>
+#include <QPropertyAnimation>
+#include <QEasingCurve>
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 #include <sstream>
 #include <iomanip>
 #include "modern_ciphers.h"
@@ -44,28 +48,46 @@ static double calc_entropy(const uint8_t *data, size_t len) {
 FrequencyHistogram::FrequencyHistogram(QWidget *parent) : QWidget(parent) {
     setMouseTracking(true);
     m_freqs.resize(26, 0.0);
+    m_startFreqs.resize(26, 0.0);
+    m_targetFreqs.resize(26, 0.0);
     m_english.assign(ENG_FREQ, ENG_FREQ + 26);
     setMinimumHeight(160);
 }
 
+void FrequencyHistogram::setAnimFraction(double f) {
+    m_animFraction = f;
+    for (int i = 0; i < 26; ++i) {
+        m_freqs[i] = m_startFreqs[i] + (m_targetFreqs[i] - m_startFreqs[i]) * f;
+    }
+    update();
+}
+
 void FrequencyHistogram::setData(const std::string &data) {
-    m_freqs.assign(26, 0.0);
+    // Save current display as start for animation
+    m_startFreqs = m_freqs;
+    m_targetFreqs.assign(26, 0.0);
     size_t letters_count = 0;
     for (unsigned char c : data) {
         if (c >= 'A' && c <= 'Z') {
-            m_freqs[c - 'A'] += 1.0;
+            m_targetFreqs[c - 'A'] += 1.0;
             letters_count++;
         } else if (c >= 'a' && c <= 'z') {
-            m_freqs[c - 'a'] += 1.0;
+            m_targetFreqs[c - 'a'] += 1.0;
             letters_count++;
         }
     }
     if (letters_count > 0) {
         for (int i = 0; i < 26; ++i) {
-            m_freqs[i] = (m_freqs[i] * 100.0) / letters_count;
+            m_targetFreqs[i] = (m_targetFreqs[i] * 100.0) / letters_count;
         }
     }
-    update();
+
+    auto *anim = new QPropertyAnimation(this, "animFraction", this);
+    anim->setDuration(300);
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void FrequencyHistogram::paintEvent(QPaintEvent *event) {
@@ -171,14 +193,28 @@ EntropyHeatmap::EntropyHeatmap(QWidget *parent) : QWidget(parent) {
     setMinimumHeight(150);
 }
 
+void EntropyHeatmap::setAnimFraction(double f) {
+    m_animFraction = f;
+    size_t n = std::min(m_startEntropy.size(), m_targetEntropy.size());
+    m_block_entropy.resize(m_targetEntropy.size());
+    for (size_t i = 0; i < n; ++i) {
+        m_block_entropy[i] = m_startEntropy[i] + (m_targetEntropy[i] - m_startEntropy[i]) * f;
+    }
+    for (size_t i = n; i < m_targetEntropy.size(); ++i) {
+        m_block_entropy[i] = m_targetEntropy[i];
+    }
+    update();
+}
+
 void EntropyHeatmap::setData(const std::string &data) {
-    m_block_entropy.clear();
+    m_startEntropy = m_block_entropy;
+    m_targetEntropy.clear();
     if (data.empty()) {
+        m_block_entropy.clear();
         update();
         return;
     }
 
-    // Determine optimal block size (e.g. 16 or 32 bytes)
     size_t block_size = 16;
     if (data.size() > 1024) block_size = 64;
     if (data.size() > 8192) block_size = 256;
@@ -186,10 +222,16 @@ void EntropyHeatmap::setData(const std::string &data) {
     for (size_t i = 0; i < data.size(); i += block_size) {
         size_t len = std::min(block_size, data.size() - i);
         double e = calc_entropy((const uint8_t*)data.data() + i, len);
-        m_block_entropy.push_back(e);
-        if (m_block_entropy.size() >= 256) break; // cap at 256 grid blocks
+        m_targetEntropy.push_back(e);
+        if (m_targetEntropy.size() >= 256) break;
     }
-    update();
+
+    auto *anim = new QPropertyAnimation(this, "animFraction", this);
+    anim->setDuration(300);
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void EntropyHeatmap::paintEvent(QPaintEvent *event) {
@@ -291,6 +333,11 @@ ShannonEntropyGraph::ShannonEntropyGraph(QWidget *parent) : QWidget(parent) {
     setMinimumHeight(150);
 }
 
+void ShannonEntropyGraph::setDrawProgress(double p) {
+    m_drawProgress = p;
+    update();
+}
+
 void ShannonEntropyGraph::setData(const std::string &data) {
     m_rolling_entropy.clear();
     if (data.size() < 16) {
@@ -300,13 +347,20 @@ void ShannonEntropyGraph::setData(const std::string &data) {
 
     size_t win_sz = 16;
     if (data.size() > 500) win_sz = 64;
-    size_t step = std::max((size_t)1, data.size() / 100); // sample about 100 points
+    size_t step = std::max((size_t)1, data.size() / 100);
 
     for (size_t i = 0; i + win_sz <= data.size(); i += step) {
         double ent = calc_entropy((const uint8_t*)data.data() + i, win_sz);
         m_rolling_entropy.push_back(ent);
     }
-    update();
+
+    m_drawProgress = 0.0;
+    auto *anim = new QPropertyAnimation(this, "drawProgress", this);
+    anim->setDuration(400);
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    anim->setEasingCurve(QEasingCurve::OutSine);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void ShannonEntropyGraph::paintEvent(QPaintEvent *event) {
@@ -338,11 +392,15 @@ void ShannonEntropyGraph::paintEvent(QPaintEvent *event) {
         painter.drawText(2, y + 4, QString::number(i * 2));
     }
 
+    // Determine how many points to draw based on drawProgress
+    size_t drawCount = std::max((size_t)2,
+        (size_t)(m_drawProgress * m_rolling_entropy.size()));
+
     // Build the line path
     QPainterPath path;
     double step_x = (double)graph_w / (m_rolling_entropy.size() - 1);
     
-    for (size_t i = 0; i < m_rolling_entropy.size(); ++i) {
+    for (size_t i = 0; i < drawCount; ++i) {
         double ent = m_rolling_entropy[i];
         double x = pad + i * step_x;
         double y = pad + graph_h - (ent / 8.0 * graph_h);
@@ -350,9 +408,17 @@ void ShannonEntropyGraph::paintEvent(QPaintEvent *event) {
         else path.lineTo(x, y);
     }
 
+    // Extend last point to edge for clean fill
+    if (drawCount > 0 && drawCount < m_rolling_entropy.size()) {
+        double x = pad + (drawCount - 1) * step_x;
+        double y = pad + graph_h - (m_rolling_entropy[drawCount - 1] / 8.0 * graph_h);
+        path.lineTo(x + step_x * 0.5, y);
+    }
+
     // Fill area under curve
     QPainterPath areaPath = path;
-    areaPath.lineTo(pad + graph_w, pad + graph_h);
+    double lastX = pad + std::min(drawCount, m_rolling_entropy.size() - 1) * step_x;
+    areaPath.lineTo(lastX, pad + graph_h);
     areaPath.lineTo(pad, pad + graph_h);
     areaPath.closeSubpath();
 
@@ -501,6 +567,592 @@ void EncodingWheel::mousePressEvent(QMouseEvent *event) {
 
         int radices[5] = {2, 8, 10, 16, 64};
         emit baseSelected(radices[sector]);
+        update();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AutocorrelationGraph Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+AutocorrelationGraph::AutocorrelationGraph(QWidget *parent) : QWidget(parent) {
+    setMouseTracking(true);
+    setMinimumHeight(140);
+}
+
+void AutocorrelationGraph::setData(const std::string &data) {
+    m_autocorr.clear();
+    m_hoverLag = -1;
+
+    if (data.size() < 4) return;
+
+    size_t n = data.size();
+    m_maxLag = std::min((size_t)200, n / 2);
+
+    // Pre-compute byte values as doubles for autocorrelation
+    std::vector<double> vals(n);
+    for (size_t i = 0; i < n; ++i)
+        vals[i] = (unsigned char)data[i];
+
+    // Compute autocorrelation at each lag
+    double sumSq = 0.0;
+    for (size_t i = 0; i < n; ++i) sumSq += vals[i] * vals[i];
+    if (sumSq == 0.0) return;
+
+    for (int lag = 1; lag <= m_maxLag; ++lag) {
+        double sum = 0.0;
+        size_t count = n - lag;
+        for (size_t i = 0; i < count; ++i)
+            sum += vals[i] * vals[i + lag];
+        m_autocorr.push_back(sum / sumSq);
+    }
+    update();
+}
+
+void AutocorrelationGraph::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    painter.fillRect(rect(), COL_SURFACE);
+
+    if (m_autocorr.size() < 2) {
+        painter.setPen(COL_TEXT_DIM);
+        painter.drawText(rect(), Qt::AlignCenter, "Periodicity data");
+        return;
+    }
+
+    int w = width();
+    int h = height();
+    int pad = 24;
+    int graph_w = w - 2 * pad;
+    int graph_h = h - 2 * pad;
+
+    // Grid lines
+    painter.setPen(QPen(COL_BORDER, 1, Qt::DotLine));
+    for (int i = 1; i <= 4; ++i) {
+        int y = pad + graph_h - (i * graph_h / 4);
+        painter.drawLine(pad, y, w - pad, y);
+    }
+
+    double bar_w = (double)graph_w / m_autocorr.size();
+
+    for (size_t i = 0; i < m_autocorr.size(); ++i) {
+        double val = m_autocorr[i];
+        int bar_h = std::max(1, (int)(val * graph_h));
+        int x = pad + i * bar_w;
+        int y = pad + graph_h - bar_h;
+
+        bool hovered = ((int)i == m_hoverLag);
+        QColor color = hovered ? COL_ACCENT_HI : COL_ACCENT;
+        color.setAlpha(hovered ? 220 : 140);
+        painter.fillRect(x + 1, y, (int)bar_w - 2, bar_h, color);
+
+        if (hovered) {
+            painter.setPen(QPen(COL_TEXT, 1));
+            painter.drawRect(x + 1, y, (int)bar_w - 2, bar_h);
+
+            QString label = QString("Lag %1: %2").arg(i + 1).arg(val, 0, 'f', 3);
+            painter.setPen(COL_ACCENT_GL);
+            painter.fillRect(5, 2, 160, 18, COL_SURFACE2);
+            painter.drawText(8, 15, label);
+        }
+    }
+
+    // X-axis labels
+    painter.setPen(COL_TEXT_DIM);
+    painter.setFont(QFont("Courier New", 7));
+    int labelStep = std::max(1, (int)m_autocorr.size() / 10);
+    for (size_t i = 0; i < m_autocorr.size(); i += labelStep) {
+        int x = pad + i * bar_w;
+        painter.drawText(x - 6, h - 4, QString::number(i + 1));
+    }
+    painter.drawText(pad, h - 4, "1");
+    painter.drawText(w - pad - 20, h - 4, QString::number(m_maxLag));
+}
+
+void AutocorrelationGraph::mouseMoveEvent(QMouseEvent *event) {
+    if (m_autocorr.empty()) return;
+    double bar_w = (double)(width() - 48) / m_autocorr.size();
+    if (bar_w <= 0) return;
+    int idx = (event->position().x() - 24) / bar_w;
+    if (idx >= 0 && idx < (int)m_autocorr.size()) {
+        if (idx != m_hoverLag) {
+            m_hoverLag = idx;
+            update();
+        }
+    } else {
+        if (m_hoverLag != -1) {
+            m_hoverLag = -1;
+            update();
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NGramHeatmap Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+NGramHeatmap::NGramHeatmap(QWidget *parent) : QWidget(parent) {
+    setMouseTracking(true);
+    setMinimumSize(220, 220);
+}
+
+void NGramHeatmap::setData(const std::string &data) {
+    memset(m_digram, 0, sizeof(m_digram));
+    m_maxCount = 1.0;
+    m_hoverR = m_hoverC = -1;
+
+    size_t count = 0;
+    for (size_t i = 0; i + 1 < data.size(); ++i) {
+        unsigned char a = data[i];
+        unsigned char b = data[i + 1];
+        if ((a >= 'A' && a <= 'Z') || (a >= 'a' && a <= 'z')) {
+            if ((b >= 'A' && b <= 'Z') || (b >= 'b' && b <= 'z')) {
+                int ra = (a >= 'a') ? a - 'a' : a - 'A';
+                int rb = (b >= 'a') ? b - 'a' : b - 'A';
+                m_digram[ra][rb] += 1.0;
+                count++;
+            }
+        }
+    }
+    if (count > 0) {
+        for (int r = 0; r < 26; ++r)
+            for (int c = 0; c < 26; ++c)
+                if (m_digram[r][c] > m_maxCount) m_maxCount = m_digram[r][c];
+    }
+    update();
+}
+
+void NGramHeatmap::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    painter.fillRect(rect(), COL_SURFACE);
+
+    int w = width();
+    int h = height();
+    int pad = 16;
+    int grid_w = w - 2 * pad;
+    int grid_h = h - 2 * pad;
+    int cell_w = grid_w / 26;
+    int cell_h = grid_h / 26;
+    if (cell_w < 3 || cell_h < 3) return;
+
+    for (int r = 0; r < 26; ++r) {
+        for (int c = 0; c < 26; ++c) {
+            int x = pad + c * cell_w;
+            int y = pad + r * cell_h;
+            double ratio = m_digram[r][c] / m_maxCount;
+
+            // Color from dark surface (low) to accent teal (high)
+            int rv = COL_SURFACE.red() + (COL_OUTPUT.red() - COL_SURFACE.red()) * ratio;
+            int gv = COL_SURFACE.green() + (COL_OUTPUT.green() - COL_SURFACE.green()) * ratio;
+            int bv = COL_SURFACE.blue() + (COL_OUTPUT.blue() - COL_SURFACE.blue()) * ratio;
+            painter.fillRect(x, y, cell_w - 1, cell_h - 1, QColor(rv, gv, bv));
+
+            if (r == m_hoverR && c == m_hoverC) {
+                painter.setPen(QPen(COL_TEXT, 2));
+                painter.drawRect(x, y, cell_w - 1, cell_h - 1);
+            }
+        }
+    }
+
+    // Axis labels
+    painter.setPen(COL_TEXT_DIM);
+    painter.setFont(QFont("Courier New", 7));
+    for (int i = 0; i < 26; ++i) {
+        int x = pad + i * cell_w + cell_w / 2 - 3;
+        int y = pad - 3;
+        painter.drawText(x, y, QString(QChar('A' + i)));
+        y = pad + i * cell_h + cell_h / 2 + 3;
+        painter.drawText(2, y, QString(QChar('A' + i)));
+    }
+
+    // Hover tooltip
+    if (m_hoverR >= 0 && m_hoverC >= 0) {
+        QString tip = QString("%1%2: %3")
+            .arg(QChar('A' + m_hoverC))
+            .arg(QChar('A' + m_hoverR))
+            .arg(m_digram[m_hoverR][m_hoverC], 0, 'f', 1);
+        painter.setPen(COL_ACCENT_GL);
+        painter.fillRect(w / 2 - 50, 2, 100, 18, COL_SURFACE2);
+        painter.drawText(w / 2 - 44, 15, tip);
+    }
+}
+
+void NGramHeatmap::mouseMoveEvent(QMouseEvent *event) {
+    int pad = 16;
+    int cell_w = (width() - 2 * pad) / 26;
+    int cell_h = (height() - 2 * pad) / 26;
+    if (cell_w <= 0 || cell_h <= 0) return;
+
+    int c = (event->position().x() - pad) / cell_w;
+    int r = (event->position().y() - pad) / cell_h;
+
+    if (r >= 0 && r < 26 && c >= 0 && c < 26) {
+        if (r != m_hoverR || c != m_hoverC) {
+            m_hoverR = r; m_hoverC = c;
+            update();
+        }
+    } else {
+        if (m_hoverR != -1 || m_hoverC != -1) {
+            m_hoverR = m_hoverC = -1;
+            update();
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HexDiffViewer Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+HexDiffViewer::HexDiffViewer(QWidget *parent) : QWidget(parent) {
+    setFocusPolicy(Qt::StrongFocus);
+    setMinimumHeight(120);
+}
+
+void HexDiffViewer::setData(const std::string &input, const std::string &output) {
+    m_input = input;
+    m_output = output;
+    m_scrollOffset = 0;
+    update();
+}
+
+void HexDiffViewer::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    painter.fillRect(rect(), COL_SURFACE);
+
+    int w = width();
+    int h = height();
+
+    int n = std::max(m_input.size(), m_output.size());
+    if (n == 0) {
+        painter.setPen(COL_TEXT_DIM);
+        painter.drawText(rect(), Qt::AlignCenter, "No data for diff");
+        return;
+    }
+
+    int rows = (n + m_bytesPerRow - 1) / m_bytesPerRow;
+    int row_h = 18;
+    int pad = 8;
+    int header_h = 20;
+
+    // Column widths
+    int offset_w = 70;
+    int input_w = (w - 3 * pad - offset_w) / 2;
+    int output_w = w - pad - offset_w - pad - input_w - pad;
+
+    int x_offset = pad;
+    int x_input = x_offset + offset_w + pad;
+    int x_output = x_input + input_w + pad;
+
+    // Header
+    painter.setPen(COL_ACCENT);
+    painter.setFont(QFont("Courier New", 8, QFont::Bold));
+    painter.drawText(x_offset, header_h - 4, "OFFSET");
+    painter.drawText(x_input, header_h - 4, "INPUT");
+    painter.drawText(x_output, header_h - 4, "OUTPUT");
+
+    // Separator line
+    painter.setPen(QPen(COL_BORDER, 1));
+    painter.drawLine(pad, header_h + 2, w - pad, header_h + 2);
+
+    int visible_rows = (h - header_h - 8) / row_h;
+    int max_row = std::max(0, rows - visible_rows);
+    if (m_scrollOffset > max_row) m_scrollOffset = max_row;
+    if (m_scrollOffset < 0) m_scrollOffset = 0;
+
+    // Draw rows
+    for (int r = 0; r < visible_rows && (r + m_scrollOffset) < rows; ++r) {
+        int row = r + m_scrollOffset;
+        int y = header_h + 6 + r * row_h;
+        int start = row * m_bytesPerRow;
+
+        // Offset label
+        painter.setPen(COL_TEXT_DIM);
+        painter.setFont(QFont("Courier New", 8));
+        QString offsetStr = QString("0x%1").arg(start, 6, 16, QChar('0'));
+        painter.drawText(x_offset, y + 12, offsetStr);
+
+        for (int side = 0; side < 2; ++side) {
+            const std::string &data = (side == 0) ? m_input : m_output;
+            int base_x = (side == 0) ? x_input : x_output;
+            int col_w = ((side == 0) ? input_w : output_w) / (m_bytesPerRow * 3);
+
+            for (int b = 0; b < m_bytesPerRow; ++b) {
+                int idx = start + b;
+                int bx = base_x + b * col_w * 3;
+
+                if (idx < (int)data.size()) {
+                    unsigned char byte = data[idx];
+
+                    // Color: matching bytes green, differing red
+                    bool match = (idx < (int)m_input.size() && idx < (int)m_output.size()
+                                  && m_input[idx] == m_output[idx]);
+                    bool inBoth = (idx < (int)m_input.size() && idx < (int)m_output.size());
+                    QColor bg;
+                    if (!inBoth) bg = COL_TEXT_DEAD;
+                    else if (match) bg = QColor(0, 60, 40, 120);
+                    else bg = QColor(80, 20, 20, 120);
+
+                    painter.fillRect(bx, y, col_w * 2 + 2, row_h - 2, bg);
+
+                    painter.setPen(match ? COL_OUTPUT : COL_ACCENT_GL);
+                    painter.drawText(bx + 1, y + 12,
+                        QString("%1").arg(byte, 2, 16, QChar('0')));
+                } else {
+                    // Missing byte
+                    painter.fillRect(bx, y, col_w * 2 + 2, row_h - 2, COL_BG);
+                    painter.setPen(COL_TEXT_DEAD);
+                    painter.drawText(bx + 1, y + 12, "..");
+                }
+            }
+        }
+    }
+
+    // Scroll indicator
+    if (max_row > 0) {
+        double vis = (double)visible_rows / rows;
+        double pos = (double)m_scrollOffset / rows;
+        int bar_h = std::max(8, (int)(vis * h));
+        int bar_y = pos * h;
+        painter.fillRect(w - 6, bar_y, 4, bar_h, COL_BORDER_HI);
+    }
+}
+
+void HexDiffViewer::wheelEvent(QWheelEvent *event) {
+    int rows = (std::max(m_input.size(), m_output.size()) + m_bytesPerRow - 1) / m_bytesPerRow;
+    int visible_rows = (height() - 20 - 8) / 18;
+    int max_row = std::max(0, rows - visible_rows);
+
+    int delta = event->angleDelta().y();
+    m_scrollOffset -= delta / 120;
+    if (m_scrollOffset > max_row) m_scrollOffset = max_row;
+    if (m_scrollOffset < 0) m_scrollOffset = 0;
+    update();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DataMiniMap Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+DataMiniMap::DataMiniMap(QWidget *parent) : QWidget(parent) {
+    setFixedHeight(28);
+    setCursor(Qt::PointingHandCursor);
+}
+
+void DataMiniMap::setData(const std::string &data) {
+    m_data = data;
+    update();
+}
+
+void DataMiniMap::setHighlight(double startFrac, double endFrac) {
+    m_hlStart = startFrac;
+    m_hlEnd = endFrac;
+    update();
+}
+
+void DataMiniMap::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    int w = width();
+    int h = height();
+
+    painter.fillRect(rect(), COL_SURFACE2);
+
+    if (m_data.empty()) {
+        painter.setPen(COL_TEXT_DEAD);
+        painter.drawText(rect(), Qt::AlignCenter, "No data");
+        return;
+    }
+
+    // Draw byte intensity strip
+    size_t n = m_data.size();
+    for (int x = 0; x < w; ++x) {
+        size_t idx = (size_t)x * n / std::max(1, w);
+        if (idx >= n) break;
+        unsigned char byte = m_data[idx];
+        double intensity = byte / 255.0;
+        int rv = 10 + (COL_OUTPUT.red() - 10) * intensity;
+        int gv = 5 + (COL_OUTPUT.green() - 5) * intensity;
+        int bv = 20 + (COL_OUTPUT.blue() - 20) * intensity;
+        painter.setPen(QColor(rv, gv, bv));
+        painter.drawPoint(x, h / 2);
+        painter.drawPoint(x, h / 2 - 1);
+        painter.drawPoint(x, h / 2 + 1);
+    }
+
+    // Highlight overlay for visible region
+    int hl_x = m_hlStart * w;
+    int hl_w = (m_hlEnd - m_hlStart) * w;
+    painter.fillRect(hl_x, 1, hl_w, h - 2, QColor(74, 124, 255, 40));
+    painter.setPen(QPen(COL_ACCENT, 1));
+    painter.drawRect(hl_x, 1, hl_w, h - 2);
+}
+
+void DataMiniMap::mousePressEvent(QMouseEvent *event) {
+    double frac = (double)event->position().x() / width();
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+    emit positionClicked(frac);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BlockCipherModeViz Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+BlockCipherModeViz::BlockCipherModeViz(QWidget *parent) : QWidget(parent) {
+    setMouseTracking(true);
+    setMinimumHeight(160);
+}
+
+void BlockCipherModeViz::setData(const std::string &data) {
+    m_data = data;
+    m_hoverBlock = -1;
+    update();
+}
+
+// Simple hash of a byte buffer for color generation
+static uint32_t block_hash(const uint8_t *data, size_t len) {
+    uint32_t h = 0x811c9dc5;
+    for (size_t i = 0; i < len; ++i) {
+        h ^= data[i];
+        h *= 0x01000193;
+    }
+    return h;
+}
+
+// Map hash to a saturated color
+static QColor hash_to_color(uint32_t hash) {
+    int r = (hash >> 16) & 0xFF;
+    int g = (hash >> 8) & 0xFF;
+    int b = hash & 0xFF;
+    // Boost saturation
+    double avg = (r + g + b) / 3.0;
+    r = std::min(255, (int)(avg + (r - avg) * 1.5));
+    g = std::min(255, (int)(avg + (g - avg) * 1.5));
+    b = std::min(255, (int)(avg + (b - avg) * 1.5));
+    if (r < 0) r = 0;
+    if (g < 0) g = 0;
+    if (b < 0) b = 0;
+    return QColor(r, g, b, 200);
+}
+
+void BlockCipherModeViz::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    painter.fillRect(rect(), COL_SURFACE);
+
+    if (m_data.size() < 16) {
+        painter.setPen(COL_TEXT_DIM);
+        painter.drawText(rect(), Qt::AlignCenter, "Need >= 16 bytes for block analysis");
+        return;
+    }
+
+    int blockSize = 16;
+    int numBlocks = m_data.size() / blockSize;
+    int displayBlocks = std::min(numBlocks, 128);
+    int cols = std::min(displayBlocks, 32);
+    int rows = (displayBlocks + cols - 1) / cols;
+
+    int panel_w = (width() - 12) / 2;
+    int pad = 16;
+    int cell_w = std::min((panel_w - pad) / cols, 20);
+    int cell_h = std::min((height() - 40) / rows, 20);
+    cell_w = std::max(4, cell_w);
+    cell_h = std::max(4, cell_h);
+
+    // Label
+    painter.setPen(COL_ACCENT);
+    painter.setFont(QFont("Courier New", 9, QFont::Bold));
+
+    // Fixed seed for CBC-like avalanche simulation
+    uint32_t cbc_state = 0x6f6243;
+
+    for (int panel = 0; panel < 2; ++panel) {
+        int base_x = 4 + panel * (panel_w + 4);
+        bool isECB = (panel == 0);
+
+        painter.drawText(base_x + pad, 12, isECB ? "ECB MODE" : "CBC MODE");
+
+        for (int i = 0; i < displayBlocks && i < numBlocks; ++i) {
+            int r = i / cols;
+            int c = i % cols;
+            int x = base_x + pad + c * cell_w;
+            int y = 20 + r * cell_h;
+
+            const uint8_t *block = (const uint8_t*)m_data.data() + i * blockSize;
+            uint32_t color_seed;
+            if (isECB) {
+                // ECB: each block independently hashed
+                color_seed = block_hash(block, blockSize);
+            } else {
+                // CBC: each block mixed with previous state
+                cbc_state = block_hash(block, blockSize) ^ (cbc_state * 0x9e3779b9);
+                color_seed = cbc_state;
+            }
+
+            QColor col = hash_to_color(color_seed);
+
+            bool hovered = (m_hoverBlock == i && isECB);
+            if (hovered) {
+                painter.setPen(QPen(COL_TEXT, 2));
+            } else {
+                painter.setPen(Qt::NoPen);
+            }
+            painter.fillRect(x, y, cell_w - 1, cell_h - 1, col);
+            if (hovered) painter.drawRect(x, y, cell_w - 1, cell_h - 1);
+        }
+    }
+
+    // Tooltip
+    if (m_hoverBlock >= 0 && m_hoverBlock < numBlocks) {
+        QString tip = QString("Block %1: %2")
+            .arg(m_hoverBlock)
+            .arg(m_data.substr(m_hoverBlock * 16, 16).c_str());
+        painter.setPen(COL_ACCENT_GL);
+        painter.fillRect(width() / 2 - 100, height() - 22, 200, 18, COL_SURFACE2);
+        painter.drawText(width() / 2 - 94, height() - 8, tip);
+    }
+}
+
+void BlockCipherModeViz::mouseMoveEvent(QMouseEvent *event) {
+    int panel_w = (width() - 12) / 2;
+    int pad = 16;
+    int numBlocks = m_data.size() / 16;
+    int displayBlocks = std::min(numBlocks, 128);
+    int cols = std::min(displayBlocks, 32);
+    int rows = (displayBlocks + cols - 1) / cols;
+    int cell_w = std::min((panel_w - pad) / cols, 20);
+    int cell_h = std::min((height() - 40) / rows, 20);
+    cell_w = std::max(4, cell_w);
+    cell_h = std::max(4, cell_h);
+
+    int mx = event->position().x();
+    int my = event->position().y();
+
+    // Check ECB panel (left side)
+    if (mx >= 4 + pad && mx < 4 + pad + cols * cell_w && my >= 20 && my < 20 + rows * cell_h) {
+        int col = (mx - 4 - pad) / cell_w;
+        int row = (my - 20) / cell_h;
+        int idx = row * cols + col;
+        if (idx >= 0 && idx < displayBlocks) {
+            if (idx != m_hoverBlock) {
+                m_hoverBlock = idx;
+                update();
+            }
+            return;
+        }
+    }
+    if (m_hoverBlock != -1) {
+        m_hoverBlock = -1;
         update();
     }
 }
