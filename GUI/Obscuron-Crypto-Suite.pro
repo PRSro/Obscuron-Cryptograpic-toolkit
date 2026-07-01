@@ -13,7 +13,9 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     menuwindow.cpp \
+    basewindow.cpp \
     numberwindow.cpp \
+    passivewindow.cpp \
     recipe_engine.cpp \
     recipe_model.cpp \
     recipe_commands.cpp \
@@ -51,7 +53,9 @@ HEADERS += \
     includes.h \
     mainwindow.h \
     menuwindow.h \
+    basewindow.h \
     numberwindow.h \
+    passivewindow.h \
     recipe_engine.h \
     recipe_model.h \
     recipe_commands.h \

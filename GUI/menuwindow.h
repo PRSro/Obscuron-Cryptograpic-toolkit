@@ -11,12 +11,16 @@ public:
 
 private:
     QPushButton *btnCipher;
+    QPushButton *btnBase;
     QPushButton *btnNumber;
+    QPushButton *btnPassive;
     QPushButton *btnSettings;
 
 private slots:
     void onCipherClicked();
+    void onBaseClicked();
     void onNumberClicked();
+    void onPassiveClicked();
 };
 
 #endif

@@ -419,6 +419,40 @@ BigInt rsa_crt_decrypt(const BigInt& c,
     return m2 + q * h;
 }
 
+static const std::string BASE_ALPHABET =
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    "!#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\"";
+
+std::string BigInt::toBase(int base, const std::string& alphabet) const {
+    std::string abc = alphabet.empty() ? BASE_ALPHABET.substr(0, base) : alphabet;
+    if (base < 2 || (int)abc.size() < base) return "";
+    if (*this == BigInt(0ULL)) return std::string(1, abc[0]);
+    BigInt n = *this;
+    n.negative = false;
+    BigInt base_big((uint64_t)base);
+    std::string result;
+    while (n > BigInt(0ULL)) {
+        auto [q, r] = divmod_internal(n, base_big);
+        uint64_t digit = r.limbs.empty() ? 0 : r.limbs[0];
+        result = abc[digit] + result;
+        n = q;
+    }
+    return result;
+}
+
+BigInt BigInt::from_base(const std::string& str, int base, const std::string& alphabet) {
+    std::string abc = alphabet.empty() ? BASE_ALPHABET.substr(0, base) : alphabet;
+    BigInt result(0ULL);
+    BigInt base_big((uint64_t)base);
+    for (char c : str) {
+        auto pos = abc.find(c);
+        if (pos == std::string::npos)
+            throw std::runtime_error("BigInt::from_base: invalid character for base " + std::to_string(base));
+        result = result * base_big + BigInt((uint64_t)pos);
+    }
+    return result;
+}
+
 std::string BigInt::toBytes() const {
     std::string result;
     for (int i = (int)limbs.size() - 1; i >= 0; i--) {

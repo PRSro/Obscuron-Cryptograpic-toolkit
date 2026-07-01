@@ -29,6 +29,8 @@ public:
     bool operator<=(const BigInt& other) const;
     bool operator>=(const BigInt& other) const;
     std::string toString() const;
+    std::string toBase(int base, const std::string& alphabet = "") const;
+    static BigInt from_base(const std::string& str, int base, const std::string& alphabet = "");
     std::string toHex() const;
     std::string toBytes() const;
     friend std::ostream& operator<<(std::ostream& os, const BigInt& n);
