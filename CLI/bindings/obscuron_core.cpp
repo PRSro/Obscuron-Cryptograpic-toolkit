@@ -156,6 +156,33 @@ PYBIND11_MODULE(_obscuron_core, m) {
         std::string out; braille_decode(a, out); return out;
     });
 
+    // ── new historical_ciphers (Porta, Gronsfeld, Hill, Nihilist) ──
+
+    m.def("porta", [](const std::string &a, const std::string &key) {
+        std::string out; porta(a, key, out); return out;
+    }, py::arg("text"), py::arg("key"));
+    m.def("gronsfeld", [](const std::string &a, const std::string &key, bool encrypt) {
+        std::string out; gronsfeld(a, key, out, encrypt); return out;
+    }, py::arg("text"), py::arg("key"), py::arg("encrypt") = true);
+    m.def("hill_encrypt", [](const std::string &a, int a11, int a12, int a21, int a22) -> std::string {
+        std::string out;
+        if (!hill_encrypt(a, out, a11, a12, a21, a22))
+            throw std::runtime_error("hill_encrypt failed");
+        return out;
+    }, py::arg("text"), py::arg("a11"), py::arg("a12"), py::arg("a21"), py::arg("a22"));
+    m.def("hill_decrypt", [](const std::string &a, int a11, int a12, int a21, int a22) -> std::string {
+        std::string out;
+        if (!hill_decrypt(a, out, a11, a12, a21, a22))
+            throw std::runtime_error("hill_decrypt failed (non-invertible matrix)");
+        return out;
+    }, py::arg("text"), py::arg("a11"), py::arg("a12"), py::arg("a21"), py::arg("a22"));
+    m.def("nihilist_encrypt", [](const std::string &a, const std::string &key) {
+        std::string out; nihilist_encrypt(a, out, key); return out;
+    }, py::arg("text"), py::arg("key"));
+    m.def("nihilist_decrypt", [](const std::string &a, const std::string &key) {
+        std::string out; nihilist_decrypt(a, out, key); return out;
+    }, py::arg("text"), py::arg("key"));
+
     // ── essential_ciphers ──
 
     m.def("raw_bytes_print", &raw_bytes_print);
@@ -294,6 +321,27 @@ PYBIND11_MODULE(_obscuron_core, m) {
     m.def("sha512_hash", [](const std::string &text) {
         std::string out; sha512_hash(text, out); return out;
     }, py::arg("text"));
+    m.def("sha384_hash", [](const std::string &text) {
+        std::string out; sha384_hash(text, out); return out;
+    }, py::arg("text"));
+    m.def("sha3_224_hash", [](const std::string &text) {
+        std::string out; sha3_224_hash(text, out); return out;
+    }, py::arg("text"));
+    m.def("sha3_256_hash", [](const std::string &text) {
+        std::string out; sha3_256_hash(text, out); return out;
+    }, py::arg("text"));
+    m.def("sha3_384_hash", [](const std::string &text) {
+        std::string out; sha3_384_hash(text, out); return out;
+    }, py::arg("text"));
+    m.def("sha3_512_hash", [](const std::string &text) {
+        std::string out; sha3_512_hash(text, out); return out;
+    }, py::arg("text"));
+    m.def("shake128_hash", [](const std::string &text, size_t out_len) {
+        std::string out; shake128_hash(text, out, out_len); return out;
+    }, py::arg("text"), py::arg("out_len") = 32);
+    m.def("shake256_hash", [](const std::string &text, size_t out_len) {
+        std::string out; shake256_hash(text, out, out_len); return out;
+    }, py::arg("text"), py::arg("out_len") = 32);
     m.def("blake2b_hash", [](const std::string &text, const std::string &key) {
         std::string out; blake2b_hash(text, out, key); return out;
     }, py::arg("text"), py::arg("key") = "");
@@ -345,6 +393,18 @@ PYBIND11_MODULE(_obscuron_core, m) {
             throw std::runtime_error("argon2id failed");
         return py::bytes(out);
     }, py::arg("password"), py::arg("salt"), py::arg("iterations"), py::arg("memory_kb"), py::arg("length"), py::arg("parallelism") = 1);
+    m.def("bcrypt_hash", [](const std::string &password, const std::string &salt, uint32_t rounds) -> std::string {
+        std::string out;
+        if (!bcrypt_hash(password, salt, rounds, out))
+            throw std::runtime_error("bcrypt failed");
+        return out;
+    }, py::arg("password"), py::arg("salt"), py::arg("rounds") = 10);
+    m.def("scrypt_hash", [](const std::string &password, const std::string &salt, uint32_t N, uint32_t r, uint32_t p, uint32_t dkLen) -> py::bytes {
+        std::string out;
+        if (!scrypt_hash(password, salt, N, r, p, dkLen, out))
+            throw std::runtime_error("scrypt failed");
+        return py::bytes(out);
+    }, py::arg("password"), py::arg("salt"), py::arg("N"), py::arg("r"), py::arg("p"), py::arg("dkLen") = 32);
 
     // ── modern_ciphers (JWT) ──
 

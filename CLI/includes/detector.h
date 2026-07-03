@@ -12,8 +12,8 @@ struct CipherCandidate {
     bool was_branched = false;
 };
 
-std::vector<CipherCandidate> detect_cipher(const std::string &input, int top_n);
-std::vector<CipherCandidate> detect_cipher_no_branch(const std::string &input, int top_n);
+std::vector<CipherCandidate> detect_cipher(const std::string &input, int top_n, bool aggressive = false);
+std::vector<CipherCandidate> detect_cipher_no_branch(const std::string &input, int top_n, bool aggressive = false);
 std::vector<CipherCandidate> detect_base(const std::string &input, int top_n);
 double score_english(const std::string &text);
 double score_english_combined(const std::string &text);

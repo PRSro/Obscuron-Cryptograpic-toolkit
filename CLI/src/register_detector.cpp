@@ -74,9 +74,15 @@ void register_detector_handlers(HandlerMap &map) {
         bool auto_mode = ctx.has("--auto");
         bool verbose = ctx.has("--verbose");
         bool no_branch = ctx.has("--no-branch");
+        bool aggressive = ctx.has("--aggressive");
         double min_conf = ctx.opt_double_flag("--min-confidence", 0.1);
         int top_n = ctx.opt_int_flag("--top", 3);
         int max_depth = ctx.opt_int_flag("--max-depth", 5);
+
+        if (ctx.input.empty()) {
+            std::cout << "Empty input detected, nothing to be done\n";
+            return;
+        }
 
         if (auto_mode && top_n < 2) top_n = 2;
 
@@ -132,7 +138,7 @@ void register_detector_handlers(HandlerMap &map) {
             std::vector<std::string> seen;
             std::vector<std::pair<std::string, std::string>> steps;
             for (int d = 0; d < max_depth; d++) {
-                std::vector<CipherCandidate> r = detect_cipher(current, top_n);
+                std::vector<CipherCandidate> r = detect_cipher(current, top_n, aggressive);
                 int lc = 0;
                 for (unsigned char ch : current)
                     if (std::isalpha(ch)) lc++;
@@ -166,7 +172,7 @@ void register_detector_handlers(HandlerMap &map) {
                 if (std::isalpha(ch)) letter_count++;
             if (top_n < 2) top_n = 2;
 
-            std::vector<CipherCandidate> results = detect_cipher(ctx.input, top_n);
+            std::vector<CipherCandidate> results = detect_cipher(ctx.input, top_n, aggressive);
             if (solve_check(results, ctx.input, letter_count)) {
                 if (verbose) {
                     std::string chain;
@@ -185,7 +191,7 @@ void register_detector_handlers(HandlerMap &map) {
             return;
         }
 
-        std::vector<CipherCandidate> results = detect_cipher(ctx.input, top_n);
+        std::vector<CipherCandidate> results = detect_cipher(ctx.input, top_n, aggressive);
         if (ctx.raw) {
             for (size_t j = 0; j < results.size(); j++) {
                 std::cout << results[j].cipher_name << "|"
@@ -270,8 +276,18 @@ void register_detector_handlers(HandlerMap &map) {
 void chain_handler(const HandlerMap &map, const Context &ctx) {
     std::string steps_str = ctx.opt_flag("--steps", "");
     bool detect_steps = ctx.has("--detect");
+    bool auto_mode = ctx.has("--auto");
+    bool aggressive = ctx.has("--aggressive");
     int top_n = ctx.opt_int_flag("--top", 3);
+    int max_depth = ctx.opt_int_flag("--max-depth", 5);
+    bool verbose = ctx.has("--verbose");
+    double min_conf = ctx.opt_double_flag("--min-confidence", 0.1);
     std::string current = ctx.input;
+
+    if (ctx.input.empty()) {
+        std::cout << "Empty input detected, nothing to be done\n";
+        return;
+    }
 
     if (!steps_str.empty()) {
         std::vector<std::string> steps;
@@ -287,12 +303,12 @@ void chain_handler(const HandlerMap &map, const Context &ctx) {
             std::string param;
             if (colon != std::string::npos) param = s.substr(colon + 1);
 
-            if (!ctx.raw && !detect_steps)
+            if (!ctx.raw && !detect_steps && !auto_mode) {
                 std::cout << "  step " << (si + 1) << ": " << cipher;
-            if (!param.empty() && !detect_steps)
-                std::cout << ":" << param;
-            if (!ctx.raw && !detect_steps)
+                if (!param.empty())
+                    std::cout << ":" << param;
                 std::cout << "\n";
+            }
 
             auto it = map.find(cipher);
             if (it != map.end()) {
@@ -330,14 +346,96 @@ void chain_handler(const HandlerMap &map, const Context &ctx) {
         }
     }
 
-    if (detect_steps) {
-        std::vector<CipherCandidate> results = detect_cipher(current, top_n);
-        for (size_t j = 0; j < results.size(); j++) {
-            if (ctx.raw)
-                std::cout << results[j].cipher_name << "|" << results[j].decrypted << "|" << results[j].confidence << "\n";
-            else
-                std::cout << results[j].confidence << "  " << results[j].cipher_name << "\n  " << results[j].decrypted << "\n";
+    static const std::unordered_set<std::string> ENCODING_NAMES = {
+        "hex","base64","base32","base85","base58","binary","octal","url","large-base"
+    };
+
+    auto run_auto_solve = [&](std::string &text,
+                               std::vector<std::pair<std::string,std::string>> &layers) {
+        std::vector<std::string> seen;
+        for (int dd = 0; dd < max_depth; dd++) {
+            int lc = 0;
+            for (unsigned char ch : text)
+                if (std::isalpha(ch)) lc++;
+            std::vector<CipherCandidate> r = detect_cipher(text, top_n, aggressive);
+            if (r.empty() || r[0].confidence < min_conf) break;
+            bool is_encoding = ENCODING_NAMES.count(r[0].cipher_name);
+            bool ok = is_encoding ? (r[0].confidence >= 0.50) ||
+                (r[0].confidence >= 0.15 && [&](){
+                    int a=0; for (unsigned char c: r[0].decrypted) if (std::isalpha(c)) a++;
+                    return !r[0].decrypted.empty() && (double)a/r[0].decrypted.size() > 0.2;
+                }()) : [&](){
+                    double gap = (r.size()>=2) ? r[0].confidence-r[1].confidence : 1.0;
+                    double is_ = score_english_combined(text);
+                    double ds = score_english_combined(r[0].decrypted);
+                    double imp = -1.0;
+                    if (ds < 999990.0 && is_ < 999990.0) imp = 1.0 - ds/is_;
+                    else if (is_ >= 999990.0) imp = 1.0;
+                    if (r[0].confidence >= 0.5) return true;
+                    if (r[0].confidence >= 0.30) {
+                        if (imp < -0.01) return false;
+                        if (lc < 15) return gap >= 0.20;
+                        return (gap >= 0.07 || imp > 0.20) && (gap >= 0.05 || imp > 0.10);
+                    }
+                    return false;
+                }();
+            if (!ok) break;
+            if (r[0].decrypted == text) break;
+            bool already_seen = false;
+            for (auto &s : seen)
+                if (s == r[0].decrypted) { already_seen = true; break; }
+            if (already_seen) break;
+            seen.push_back(r[0].decrypted);
+            layers.push_back({r[0].cipher_name, r[0].key});
+            text = r[0].decrypted;
         }
+    };
+
+    if (detect_steps) {
+        std::vector<CipherCandidate> results = detect_cipher(current, top_n, aggressive);
+        bool is_english = false;
+        for (auto &c : results)
+            if (c.cipher_name == "plaintext") { is_english = true; break; }
+        if (is_english) {
+            for (size_t j = 0; j < results.size(); j++) {
+                if (ctx.raw)
+                    std::cout << results[j].cipher_name << "|" << results[j].decrypted << "|"
+                              << results[j].confidence << "\n";
+                else
+                    std::cout << results[j].confidence << "  " << results[j].cipher_name
+                              << "\n  " << results[j].decrypted << "\n";
+            }
+        } else {
+            std::vector<std::pair<std::string,std::string>> layers;
+            layers.push_back({results[0].cipher_name, results[0].key});
+            current = results[0].decrypted;
+            run_auto_solve(current, layers);
+            if (!ctx.raw && (verbose || layers.size() > 1)) {
+                for (size_t i = 0; i < layers.size(); i++) {
+                    if (i > 0) std::cout << " → ";
+                    std::cout << layers[i].first;
+                    if (!layers[i].second.empty())
+                        std::cout << "(" << layers[i].second << ")";
+                }
+                if (!layers.empty()) std::cout << " → ";
+            }
+            std::cout << current;
+            if (!ctx.raw) std::cout << "\n";
+        }
+    } else if (auto_mode) {
+        std::vector<std::pair<std::string,std::string>> layers;
+        run_auto_solve(current, layers);
+        if (!ctx.raw && (verbose || layers.size() > 1)) {
+            for (size_t i = 0; i < layers.size(); i++) {
+                if (i > 0) std::cout << " → ";
+                std::cout << layers[i].first;
+                if (!layers[i].second.empty())
+                    std::cout << "(" << layers[i].second << ")";
+            }
+            if (!layers.empty()) std::cout << " → ";
+        }
+        std::cout << current;
+        if (!ctx.raw) std::cout << "\n";
     } else {
         std::cout << format_output(current, ctx.hex_output);
         if (!ctx.raw) std::cout << "\n";

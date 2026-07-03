@@ -12,6 +12,25 @@ void register_modern_handlers(HandlerMap &map) {
     map["sha1"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha1_hash); };
     map["sha256"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha256_hash); };
     map["sha512"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha512_hash); };
+    map["sha384"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha384_hash); };
+    map["sha3-224"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha3_224_hash); };
+    map["sha3-256"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha3_256_hash); };
+    map["sha3-384"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha3_384_hash); };
+    map["sha3-512"] = [hash_handler](const Context &ctx) { hash_handler(ctx, sha3_512_hash); };
+
+    map["shake128"] = [](const Context &ctx) {
+        std::string out;
+        size_t len = (size_t)ctx.opt_int_flag("--len", 32);
+        shake128_hash(ctx.input, out, len);
+        print_result(ctx, out);
+    };
+
+    map["shake256"] = [](const Context &ctx) {
+        std::string out;
+        size_t len = (size_t)ctx.opt_int_flag("--len", 32);
+        shake256_hash(ctx.input, out, len);
+        print_result(ctx, out);
+    };
 
     map["blake2b"] = [](const Context &ctx) {
         std::string out;
@@ -56,6 +75,25 @@ void register_modern_handlers(HandlerMap &map) {
     map["aes-ecb"] = [aes_handler](const Context &ctx) { aes_handler(ctx, 0, "ECB"); };
     map["aes-cbc"] = [aes_handler](const Context &ctx) { aes_handler(ctx, 1, "CBC"); };
     map["aes-ctr"] = [aes_handler](const Context &ctx) { aes_handler(ctx, 2, "CTR"); };
+
+    map["aes-gcm"] = [](const Context &ctx) {
+        std::string k = hex_decode_str(ctx.flag("-k"));
+        std::string iv = hex_decode_str(ctx.flag("-i"));
+        std::string aad = ctx.opt_flag("--aad", "");
+        std::string out, tag;
+        if (ctx.has("--decrypt")) {
+            std::string tag_in = hex_decode_str(ctx.flag("--tag"));
+            if (!aes_gcm_decrypt(ctx.input, k, iv, aad, tag_in, out))
+                throw CipherError("AES-GCM decrypt failed (wrong key, tag mismatch, or invalid input)");
+            print_result(ctx, out);
+        } else {
+            if (!aes_gcm_encrypt(ctx.input, k, iv, aad, out, tag))
+                throw CipherError("AES-GCM encrypt failed (check key size: 16/32 bytes hex)");
+            std::string hex_ct = to_hex((const unsigned char*)out.data(), out.size());
+            std::string hex_tag = to_hex((const unsigned char*)tag.data(), tag.size());
+            print_result(ctx, hex_ct + " " + hex_tag);
+        }
+    };
 
     map["chacha20"] = [](const Context &ctx) {
         std::string k = hex_decode_str(ctx.flag("-k"));
@@ -147,6 +185,27 @@ void register_modern_handlers(HandlerMap &map) {
         std::string out = ctx.input;
         for (size_t j = 0; j < ctx.input.size(); j++)
             out[j] = ctx.input[j] ^ k[j % k.size()];
+        print_result(ctx, out);
+    };
+
+    map["bcrypt"] = [](const Context &ctx) {
+        std::string salt = hex_decode_str(ctx.flag("-s"));
+        uint32_t rounds = (uint32_t)ctx.opt_int_flag("--rounds", 10);
+        std::string out;
+        bool ok = bcrypt_hash(ctx.input, salt, rounds, out);
+        if (!ok) throw CipherError("bcrypt failed (salt must be 16 bytes, rounds 4-31)");
+        print_result(ctx, out);
+    };
+
+    map["scrypt"] = [](const Context &ctx) {
+        std::string salt = hex_decode_str(ctx.flag("-s"));
+        uint32_t N = (uint32_t)ctx.opt_int_flag("--N", 1024);
+        uint32_t r = (uint32_t)ctx.opt_int_flag("-r", 8);
+        uint32_t p = (uint32_t)ctx.opt_int_flag("-p", 1);
+        uint32_t len = (uint32_t)ctx.opt_int_flag("--len", 32);
+        std::string out;
+        bool ok = scrypt_hash(ctx.input, salt, N, r, p, len, out);
+        if (!ok) throw CipherError("scrypt failed");
         print_result(ctx, out);
     };
 

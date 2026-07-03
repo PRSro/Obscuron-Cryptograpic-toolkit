@@ -27,14 +27,23 @@ SHA1State sha1_state_from_hash(const std::string &hash_hex);
 bool sha1_hash_continue(const SHA1State &state, uint64_t processed_bytes, const std::string &extra, std::string &output);
 
 void sha256_hash(const std::string &input, std::string &output);
+void sha384_hash(const std::string &input, std::string &output);
 
 struct SHA256State { uint32_t h[8]; };
 SHA256State sha256_state_from_hash(const std::string &hash_hex);
 bool sha256_hash_continue(const SHA256State &state, uint64_t processed_bytes, const std::string &extra, std::string &output);
 
 void sha512_hash(const std::string &input, std::string &output);
+void sha3_224_hash(const std::string &input, std::string &output);
+void sha3_256_hash(const std::string &input, std::string &output);
+void sha3_384_hash(const std::string &input, std::string &output);
+void sha3_512_hash(const std::string &input, std::string &output);
+void shake128_hash(const std::string &input, std::string &output, size_t out_len = 32);
+void shake256_hash(const std::string &input, std::string &output, size_t out_len = 32);
 void blake2b_hash(const std::string &input, std::string &output, const std::string &key = "");
 void blake2s_hash(const std::string &input, std::string &output, const std::string &key = "");
+
+void weak_kdf_demo(const std::string &password, const std::string &salt, uint32_t iterations, uint32_t memory_kb, uint32_t key_len, std::string &output);
 
 // HMAC
 void hmac_sha256(const std::string &input, const std::string &key, std::string &output);
@@ -43,11 +52,21 @@ void hmac_sha512(const std::string &input, const std::string &key, std::string &
 // Key Derivation Functions
 void pbkdf2_sha256(const std::string &password, const std::string &salt, uint32_t iterations, uint32_t key_len, std::string &output);
 bool argon2id_hash(const std::string &password, const std::string &salt, uint32_t iterations, uint32_t memory_kb, uint32_t parallelism, uint32_t key_len, std::string &output);
+bool bcrypt_hash(const std::string &password, const std::string &salt, uint32_t rounds, std::string &output);
+bool scrypt_hash(const std::string &password, const std::string &salt, uint32_t N, uint32_t r, uint32_t p, uint32_t dkLen, std::string &output);
 
 // Symmetric Ciphers
 // Mode: 0=ECB, 1=CBC, 2=CTR
 bool aes_encrypt(const std::string &plaintext, const std::string &key, const std::string &iv, int mode, std::string &ciphertext);
 bool aes_decrypt(const std::string &ciphertext, const std::string &key, const std::string &iv, int mode, std::string &plaintext, bool strip_pkcs7 = true);
+
+// AES-GCM Authenticated Encryption
+bool aes_gcm_encrypt(const std::string &plaintext, const std::string &key,
+                     const std::string &iv, const std::string &aad,
+                     std::string &ciphertext, std::string &tag);
+bool aes_gcm_decrypt(const std::string &ciphertext, const std::string &key,
+                     const std::string &iv, const std::string &aad,
+                     const std::string &tag, std::string &plaintext);
 
 void chacha20_crypt(const std::string &input, const std::string &key, const std::string &nonce, uint32_t counter, std::string &output);
 void salsa20_crypt(const std::string &input, const std::string &key, const std::string &nonce, uint32_t counter, std::string &output);

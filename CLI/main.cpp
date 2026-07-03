@@ -27,8 +27,15 @@ Context parse_args(int argc, char *argv[]) {
     std::string input;
 
     int i = 1;
+    bool end_of_flags = false;
     while (i < argc) {
         std::string arg = argv[i];
+        if (arg == "--") { end_of_flags = true; i++; continue; }
+        if (end_of_flags) {
+            if (ctx.input.empty()) ctx.input = arg;
+            else ctx.input += " " + arg;
+            i++; continue;
+        }
         if (arg == "--raw") { ctx.raw = true; i++; }
         else if (arg == "--hex-input") { hex_input = true; i++; }
         else if (arg == "--hex-output") { ctx.hex_output = true; i++; }
@@ -55,16 +62,26 @@ Context parse_args(int argc, char *argv[]) {
             const std::string &a = ctx.args[ai];
             if (a == "-f" || a == "-") continue;
             if (!a.empty() && a[0] == '-') {
+    // Check if this looks like a flag (only alnum, -, = chars after leading '-')
+    bool is_flag_like = true;
+    for (size_t ci = 1; ci < a.size(); ci++) {
+        unsigned char c = a[ci];
+        if (!std::isalnum(c) && c != '-' && c != '=') {
+            is_flag_like = false; break;
+        }
+    }
+    if (!is_flag_like) { input = a; break; }
     static const std::unordered_set<std::string> vf = {
         "-s","-k","--steps","--min-confidence","--top","--max-depth",
-        "-e","-n","-c","-d","-e1","-e2","-c1","-c2",
-        "-p","--e","-b","--oracle","--timeout","-i","--ciphertexts",
+        "-e","-n","-a","-b","-c","-d","-e1","-e2","-c1","-c2",
+        "-p","--e","--oracle","--timeout","-i","--ciphertexts",
         "--moduli","--x1","--y1","--x2","--y2","--a","--p",
         "--k","--x","--y","--g","--h","--matrix",
         "--b","--key","--text","--iv","--nonce","--aad","--tag",
         "--password","--salt","--info","--ikm","--seed","--offset",
         "--len","--cols","--rails","--depth","--layers","--radius",
-        "--secret"
+        "--secret", "--qx", "--qy", "--r", "--s", "--curve",
+        "--pubkey", "--sig", "--bits"
     };
     size_t eq = a.find('=');
     if (eq != std::string::npos) continue;
@@ -72,8 +89,8 @@ Context parse_args(int argc, char *argv[]) {
     if (a == "--help" || a == "-h" || a == "--list" || a == "--raw"
         || a == "--verbose" || a == "--decrypt" || a == "--hex-input"
         || a == "--hex-output" || a == "--solve" || a == "--auto"
-        || a == "--no-branch" || a == "--debug"
-        || a == "--i-understand-this-is-insecure") { continue; }
+    || a == "--no-branch" || a == "--detect" || a == "--debug" || a == "--json"
+    || a == "--i-understand-this-is-insecure" || a == "--aggressive") { continue; }
             }
             input = a;
             break;
@@ -94,7 +111,7 @@ Context parse_args(int argc, char *argv[]) {
 
 static void print_list() {
     const char *names[] = {
-        "a1z26", "adfgvx", "aes-cbc", "aes-ctr", "aes-ecb", "affine",
+        "a1z26", "adfgvx", "aes-cbc", "aes-ctr", "aes-ecb", "aes-gcm", "affine",
         "analyze", "atbash", "autokey", "bacon", "base_decode",
         "base_encode", "beaufort", "bifid", "big-endian", "binary",
         "blake2b", "blake2s", "blowfish", "braille", "brute-caesar",
@@ -105,7 +122,9 @@ static void print_list() {
         "keyword", "large", "little-endian", "lsb-embed", "lsb-extract",
         "md5", "morse", "octal", "pbkdf2", "playfair", "poly1305",
         "polybius", "proper-base", "qr", "railfence", "rc4", "rot13",
-        "rot47", "rot8000", "scytale", "sha1", "sha256", "sha512",
+        "rot47", "rot8000", "scytale", "sha1", "sha256", "sha384", "sha512",
+        "sha3-224", "sha3-256", "sha3-384", "sha3-512", "shake128", "shake256",
+        "bcrypt", "scrypt",
         "str-xor", "substitution", "substitution-solve", "trifid",
         "urlcode", "vigenere", "weak-kdf-demo", "xor", "jwt-parse", "jwt-sign",
         "rsa-decrypt", "rsa-wiener", "rsa-hastad", "rsa-common-modulus",
@@ -116,6 +135,10 @@ static void print_list() {
          "ecdsa-nonce-reuse", "dh-check", "zip-crack",
          "shamir-reconstruct", "gf256-mul", "gf256-inv",
          "tls-fingerprint", "parse-cert", "salsa20",
+         "pem-decode", "der-decode", "asn1-parse",
+         "ecdsa-keygen", "ecdsa-sign", "ecdsa-verify",
+         "ed25519-keygen", "ed25519-sign", "ed25519-verify",
+         "rsa-pss-keygen", "rsa-pss-sign", "rsa-pss-verify",
          nullptr
     };
     for (int j = 0; names[j]; j++) std::cout << names[j] << "\n";

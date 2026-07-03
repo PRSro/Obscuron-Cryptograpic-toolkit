@@ -47,4 +47,11 @@ void braille_to_simple_dots(const std::string &cell, std::string &out);
 void braille_encode(const std::string &a, std::string &out);
 void braille_decode(const std::string &a, std::string &out);
 
+void porta(const std::string &a, const std::string &key, std::string &out);
+void gronsfeld(const std::string &a, const std::string &key, std::string &out, bool encrypt);
+bool hill_encrypt(const std::string &a, std::string &out, int a11, int a12, int a21, int a22);
+bool hill_decrypt(const std::string &a, std::string &out, int a11, int a12, int a21, int a22);
+void nihilist_encrypt(const std::string &a, std::string &out, const std::string &key);
+void nihilist_decrypt(const std::string &a, std::string &out, const std::string &key);
+
 #endif

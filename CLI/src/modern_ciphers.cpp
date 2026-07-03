@@ -1,4 +1,5 @@
 #include "../includes/modern_ciphers.h"
+#include "../includes/asn1.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -385,6 +386,549 @@ void sha512_hash(const std::string &input, std::string &output) {
         }
     }
     output = to_hex(digest, 64);
+}
+
+void sha384_hash(const std::string &input, std::string &output) {
+    auto ROTR = [](uint64_t x, uint64_t n) { return (x >> n) | (x << (64 - n)); };
+
+    uint64_t h[8] = {
+        0xcbbb9d5dc1059ed8ULL, 0x629a292a367cd507ULL, 0x9159015a3070dd17ULL, 0x152fecd8f70e5939ULL,
+        0x67332667ffc00b31ULL, 0x8eb44a8768581511ULL, 0xdb0c2e0d64f98fa7ULL, 0x47b5481dbefa4fa4ULL
+    };
+
+    static const uint64_t k[] = {
+        0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL,
+        0x3956c25bf348b538ULL, 0x59f111f1b605d019ULL, 0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL,
+        0xd807aa98a3030242ULL, 0x12835b0145706fbeULL, 0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL,
+        0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL, 0x9bdc06a725c71235ULL, 0xc19bf174cf692694ULL,
+        0xe49b69c19ef14ad2ULL, 0xefbe4786384f25e3ULL, 0x0fc19dc68b8cd5b5ULL, 0x240ca1cc77ac9c65ULL,
+        0x2de92c6f592b0275ULL, 0x4a7484aa6ea6e483ULL, 0x5cb0a9dcbd41fbd4ULL, 0x76f988da831153b5ULL,
+        0x983e5152ee66dfabULL, 0xa831c66d2db43210ULL, 0xb00327c898fb213fULL, 0xbf597fc7beef0ee4ULL,
+        0xc6e00bf33da88fc2ULL, 0xd5a79147930aa725ULL, 0x06ca6351e003826fULL, 0x142929670a0e6e70ULL,
+        0x27b70a8546d22ffcULL, 0x2e1b21385c26c926ULL, 0x4d2c6dfc5ac42aedULL, 0x53380d139d95b3dfULL,
+        0x650a73548baf63deULL, 0x766a0abb3c77b2a8ULL, 0x81c2c92e47edaee6ULL, 0x92722c851482353bULL,
+        0xa2bfe8a14cf10364ULL, 0xa81a664bbc423001ULL, 0xc24b8b70d0f89791ULL, 0xc76c51a30654be30ULL,
+        0xd192e819d6ef5218ULL, 0xd69906245565a910ULL, 0xf40e35855771202aULL, 0x106aa07032bbd1b8ULL,
+        0x19a4c116b8d2d0c8ULL, 0x1e376c085141ab53ULL, 0x2748774cdf8eeb99ULL, 0x34b0bcb5e19b48a8ULL,
+        0x391c0cb3c5c95a63ULL, 0x4ed8aa4ae3418acbULL, 0x5b9cca4f7763e373ULL, 0x682e6ff3d6b2b8a3ULL,
+        0x748f82ee5defb2fcULL, 0x78a5636f43172f60ULL, 0x84c87814a1f0ab72ULL, 0x8cc702081a6439ecULL,
+        0x90befffa23631e28ULL, 0xa4506cebde82bde9ULL, 0xbef9a3f7b2c67915ULL, 0xc67178f2e372532bULL,
+        0xca273eceea26619cULL, 0xd186b8c721c0c207ULL, 0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL,
+        0x06f067aa72176fbaULL, 0x0a637dc5a2c898a6ULL, 0x113f9804bef90daeULL, 0x1b710b35131c471bULL,
+        0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL, 0x431d67c49c100d4cULL,
+        0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
+    };
+
+    std::string padded = input;
+    uint64_t bit_len = padded.size() * 8;
+    padded.push_back((char)0x80);
+    while ((padded.size() * 8) % 1024 != 896) padded.push_back(0);
+    for (int i = 0; i < 8; i++) padded.push_back(0);
+    for (int i = 7; i >= 0; i--) padded.push_back((char)((bit_len >> (i * 8)) & 0xFF));
+
+    for (size_t offset = 0; offset < padded.size(); offset += 128) {
+        uint64_t w[80] = {0};
+        for (int i = 0; i < 16; i++) {
+            w[i] = 0;
+            for (int j = 0; j < 8; j++)
+                w[i] = (w[i] << 8) | (unsigned char)padded[offset + i*8 + j];
+        }
+        for (int i = 16; i < 80; i++) {
+            uint64_t s0 = ROTR(w[i-15], 1) ^ ROTR(w[i-15], 8) ^ (w[i-15] >> 7);
+            uint64_t s1 = ROTR(w[i-2], 19) ^ ROTR(w[i-2], 61) ^ (w[i-2] >> 6);
+            w[i] = w[i-16] + s0 + w[i-7] + s1;
+        }
+        uint64_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], _h = h[7];
+        for (int i = 0; i < 80; i++) {
+            uint64_t S1 = ROTR(e, 14) ^ ROTR(e, 18) ^ ROTR(e, 41);
+            uint64_t ch = (e & f) ^ (~e & g);
+            uint64_t temp1 = _h + S1 + ch + k[i] + w[i];
+            uint64_t S0 = ROTR(a, 28) ^ ROTR(a, 34) ^ ROTR(a, 39);
+            uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
+            uint64_t temp2 = S0 + maj;
+            _h = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+        h[4] += e; h[5] += f; h[6] += g; h[7] += _h;
+    }
+
+    unsigned char digest[48];
+    for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 8; j++)
+            digest[i*8 + j] = (unsigned char)(h[i] >> ((7 - j) * 8));
+    }
+    output = to_hex(digest, 48);
+}
+
+// ── SHA3 / Keccak sponge ─────────────────────────────────────────────────
+// Keccak-f[1600] permutation constants
+static const int KECCAK_ROUNDS = 24;
+static const uint64_t KECCAK_RC[24] = {
+    0x0000000000000001ULL, 0x0000000000008082ULL, 0x800000000000808aULL,
+    0x8000000080008000ULL, 0x000000000000808bULL, 0x0000000080000001ULL,
+    0x8000000080008081ULL, 0x8000000000008009ULL, 0x000000000000008aULL,
+    0x0000000000000088ULL, 0x0000000080008009ULL, 0x000000008000000aULL,
+    0x000000008000808bULL, 0x800000000000008bULL, 0x8000000000008089ULL,
+    0x8000000000008003ULL, 0x8000000000008002ULL, 0x8000000000000080ULL,
+    0x000000000000800aULL, 0x800000008000000aULL, 0x8000000080008081ULL,
+    0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL
+};
+
+static const int KECCAK_RHO[24] = {
+     1,  3,  6, 10, 15, 21, 28, 36, 45, 55,  2, 14,
+    27, 41, 56,  8, 25, 43, 62, 18, 39, 61, 20, 44
+};
+
+static const int KECCAK_PI[24] = {
+    10,  7, 11, 17, 18,  3,  5, 16,  8, 21, 24,  4,
+    15, 23, 19, 13, 12,  2, 20, 14, 22,  9,  6,  1
+};
+
+static void keccak_f1600(uint64_t st[25]) {
+    for (int r = 0; r < 24; r++) {
+        // θ step
+        uint64_t C[5], D[5];
+        for (int i = 0; i < 5; i++)
+            C[i] = st[i] ^ st[i+5] ^ st[i+10] ^ st[i+15] ^ st[i+20];
+        for (int i = 0; i < 5; i++)
+            D[i] = C[(i+4)%5] ^ ((C[(i+1)%5] << 1) | (C[(i+1)%5] >> 63));
+        for (int i = 0; i < 25; i++)
+            st[i] ^= D[i % 5];
+
+        // ρ and π steps
+        uint64_t last = st[1];
+        for (int i = 0; i < 24; i++) {
+            int j = KECCAK_PI[i];
+            uint64_t t = st[j];
+            st[j] = ((last << KECCAK_RHO[i]) | (last >> (64 - KECCAK_RHO[i])));
+            last = t;
+        }
+
+        // χ step
+        for (int i = 0; i < 5; i++) {
+            int o = i * 5;
+            uint64_t t[5] = {st[o], st[o+1], st[o+2], st[o+3], st[o+4]};
+            for (int j = 0; j < 5; j++)
+                st[o+j] = t[j] ^ (~t[(j+1)%5] & t[(j+2)%5]);
+        }
+
+        // ι step
+        st[0] ^= KECCAK_RC[r];
+    }
+}
+
+static void keccak_sponge(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len, int rate_bytes, uint8_t suffix) {
+    uint64_t st[25] = {0};
+    uint8_t *state_bytes = (uint8_t*)st;
+
+    // Absorb
+    for (size_t i = 0; i < input_len; i += rate_bytes) {
+        for (int j = 0; j < rate_bytes && i + j < input_len; j++)
+            state_bytes[j] ^= input[i + j];
+        keccak_f1600(st);
+    }
+
+    // Padding with suffix followed by 0x80
+    size_t offset = input_len % rate_bytes;
+    state_bytes[offset] ^= suffix;
+    state_bytes[rate_bytes - 1] ^= 0x80;
+    keccak_f1600(st);
+
+    // Squeeze
+    size_t written = 0;
+    while (written < output_len) {
+        size_t chunk = std::min((size_t)rate_bytes, output_len - written);
+        memcpy(output + written, state_bytes, chunk);
+        written += chunk;
+        if (written < output_len) keccak_f1600(st);
+    }
+}
+
+void sha3_224_hash(const std::string &input, std::string &output) {
+    uint8_t digest[28];
+    keccak_sponge((const uint8_t*)input.data(), input.size(), digest, 28, 1152 / 8, 0x06);
+    output = to_hex(digest, 28);
+}
+
+void sha3_256_hash(const std::string &input, std::string &output) {
+    uint8_t digest[32];
+    keccak_sponge((const uint8_t*)input.data(), input.size(), digest, 32, 1088 / 8, 0x06);
+    output = to_hex(digest, 32);
+}
+
+void sha3_384_hash(const std::string &input, std::string &output) {
+    uint8_t digest[48];
+    keccak_sponge((const uint8_t*)input.data(), input.size(), digest, 48, 832 / 8, 0x06);
+    output = to_hex(digest, 48);
+}
+
+void sha3_512_hash(const std::string &input, std::string &output) {
+    uint8_t digest[64];
+    keccak_sponge((const uint8_t*)input.data(), input.size(), digest, 64, 576 / 8, 0x06);
+    output = to_hex(digest, 64);
+}
+
+void shake128_hash(const std::string &input, std::string &output, size_t out_len) {
+    uint8_t *digest = new uint8_t[out_len];
+    keccak_sponge((const uint8_t*)input.data(), input.size(), digest, out_len, 1344 / 8, 0x1F);
+    output = to_hex(digest, out_len);
+    delete[] digest;
+}
+
+void shake256_hash(const std::string &input, std::string &output, size_t out_len) {
+    uint8_t *digest = new uint8_t[out_len];
+    keccak_sponge((const uint8_t*)input.data(), input.size(), digest, out_len, 1088 / 8, 0x1F);
+    output = to_hex(digest, out_len);
+    delete[] digest;
+}
+
+// ── bcrypt / eksblowfish ─────────────────────────────────────────────────
+// Blowfish P-array and S-boxes initialized from π hex digits
+static const uint32_t BF_P_DEFAULT[18] = {
+    0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0,
+    0x082efa98, 0xec4e6c89, 0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c,
+    0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917, 0x9216d5d9, 0x8979fb1b
+};
+
+static const uint32_t BF_S_DEFAULT[4][256] = {
+    {0xd1310ba6,0x98dfb5ac,0x2ffd72db,0xd01adfb7,0xb8e1afed,0x6a267e96,0xba7c9045,0xf12c7f99,
+     0x24a19947,0xb3916cf7,0x0801f2e2,0x858efc16,0x636920d8,0x71574e69,0xa458fea3,0xf4933d7e,
+     0x0d95748f,0x728eb658,0x718bcd58,0x82154aee,0x7b54a41d,0xc25a59b5,0x9c30d539,0x2af26013,
+     0xc5d1b023,0x286085f0,0xca417918,0xb8db38ef,0x8e79dcb0,0x603a180e,0x6c9e0e8b,0xb01e8a3e,
+     0xd71577c1,0xbd314b27,0x78af2fda,0x55605c60,0xe65525f3,0xaa55ab94,0x57489862,0x63e81440,
+     0x55ca396a,0x2aab10b6,0xb4cc5c34,0x1141e8ce,0xa15486af,0x7c72e993,0xb3ee1411,0x636fbc2a,
+     0x2ba9c55d,0x741831f6,0xce5c3e16,0x9b87931e,0xafd6ba33,0x6c24cf5c,0x7a325381,0x28958677,
+     0x3b8f4898,0x6b4bb9af,0xc4bfe81b,0x66282193,0x61d809cc,0xfb21a991,0x487cac60,0x5dec8032,
+     0xef845d5d,0xe98575b1,0xdc262302,0xeb651b88,0x23893e81,0xd396acc5,0x0f6d6ff3,0x83f44239,
+     0x2e0b4482,0xa4842004,0x69c8f04a,0x9e1f9b5e,0x21c66842,0xf6e96c9a,0x670c9c61,0xabd388f0,
+     0x6a51a0d2,0xd8542f68,0x960fa728,0xab5133a3,0x6eef0b6c,0x137a3be4,0xba3bf050,0x7efb2a98,
+     0xa1f1651d,0x39af0176,0x66ca593e,0x82430e88,0x8cee8619,0x456f9fb4,0x7d84a5c3,0x3b8b5ebe,
+     0xe06f75d8,0x85c12073,0x401a449f,0x56c16aa6,0x4ed3aa62,0x363f7706,0x1bfedf72,0x429b023d,
+     0x37d0d724,0xd00a1248,0xdb0fead3,0x49f1c09b,0x075372c9,0x80991b7b,0x25d479d8,0xf6e8def7,
+     0xe3fe501a,0xb6794c3b,0x976ce0bd,0x04c006ba,0xc1a94fb6,0x409f60c4,0x5e5c9ec2,0x196a2463,
+     0x68fb6faf,0x3e6c53b5,0x1339b2eb,0x3b52ec6f,0x6dfc511f,0x9b30952c,0xcc814544,0xaf5ebd09,
+     0xbee3d004,0xde334afd,0x660f2807,0x192e4bb3,0xc0cba857,0x45c8740f,0xd20b5f39,0xb9d3fbdb,
+     0x5579c0bd,0x1a60320a,0xd6a100c6,0x402c7279,0x679f25fe,0xfb1fa3cc,0x8ea5e9f8,0xdb3222f8,
+     0x3c7516df,0xfd616b15,0x2f501ec8,0xad0552ab,0x323db5fa,0xfd238760,0x53317b48,0x3e00df82,
+     0x9e5c57bb,0xca6f8ca0,0x1a87562e,0xdf1769db,0xd542a8f6,0x287effc3,0xac6732c6,0x8c4f5573,
+     0x695b27b0,0xbbca58c8,0xe1ffa35d,0xb8f011a0,0x10fa3d98,0xfd2183b8,0x4afcb56c,0x2dd1d35b,
+     0x9a53e479,0xb6f84565,0xd28e49bc,0x4bfb9790,0xe1ddf2da,0xa4cb7e33,0x62fb1341,0xcee4c6e8,
+     0xef20cada,0x36774c01,0xd07e9efe,0x2bf11fb4,0x95dbda4d,0xae909198,0xeaad8e71,0x6b93d5a0,
+     0xd08ed1d0,0xafc725e0,0x8e3c5b2f,0x8e7594b7,0x8ff6e2fb,0xf2122b64,0x8888b812,0x900df01c,
+     0x4fad5ea0,0x688fc31c,0xd1cff191,0xb3a8c1ad,0x2f2f2218,0xbe0e1777,0xea752dfe,0x8b021fa1,
+     0xe5a0cc0f,0xb56f74e8,0x18acf3d6,0xce89e299,0xb4a84fe0,0xfd13e0b7,0x7cc43b81,0xd2ada8d9,
+     0x165fa266,0x80957705,0x93cc7314,0x211a1477,0xe6ad2065,0x77b5fa86,0xc75442f5,0xfb9d35cf,
+     0xebcdaf0c,0x7b3e89a0,0xd6411bd3,0xae1e7e49,0x00250e2d,0x2071b35e,0x226800bb,0x57b8e0af,
+     0x2464369b,0xf009b91e,0x5563911d,0x59dfa6aa,0x78c14389,0xd95a537f,0x207d5ba2,0x02e5b9c5,
+     0x83260376,0x6295cfa9,0x11c81968,0x4e734a41,0xb3472dca,0x7b14a94a,0x1c510043,0x224bcaea,
+     0x57087a72,0xbea4e690,0xd0d0c304,0x4f51a8b,0x44f589a9,0x5579f8f3,0x5b145546,0x4e84b3b3,
+     0xc21167f5,0x1ca48bab,0x60cf1b1d,0x9e3a6df6,0x4f2d5cb6,0xc6753ba7,0xbb1f3e3e,0x9b45226d},
+    {0xe72d7d37,0x8ad289b9,0x60cdcfb1,0x2327d52c,0x3998c6ec,0x189e3ac4,0x17763b0e,0x860f179d,
+     0xe6ae5ee3,0x5628deaf,0x8ec16857,0xb02bbf5b,0x2d958815,0x8351dd0c,0xb8786a36,0x67beb80a,
+     0x27e21bef,0x87a093dc,0x6180d9f7,0xdb0dc7c8,0x8348b7b0,0x1ea9f133,0x2a02cd91,0x7fa4d348,
+     0xb1d1b307,0x3e8b9e1f,0x9ef15634,0x614b79ef,0xb14bef5d,0x2705c97e,0x0cf3160d,0xa2430be0,
+     0x8f8fe78e,0x27a2eb5b,0xb570dd54,0x1b225aa7,0x8dfb4144,0xa8f8f540,0x2f9a68c4,0x54de2bea,
+     0xfc2b0b9a,0x86c12143,0x63d326d6,0xd32eb7bb,0x6cc5cf79,0x38584cc5,0x3f8f7ed5,0xb9fa51c7,
+     0xaa994a6e,0xceac7a7f,0xc86f03ac,0x48eafcb0,0x1c82cf3d,0xc1e65d5a,0xaae9a4a3,0x75b3ebe7,
+     0xb0c56c9e,0x9d58b1b9,0x98d9d1da,0x59e89e60,0xa5b67d39,0xacfd9af0,0x57b96abd,0x6e52e231,
+     0x209d9bb3,0x24225888,0xdabba29a,0x2106fff7,0xd577a365,0x3096bc4f,0x9358f985,0x685c5b80,
+     0x2cc07852,0xaa74550c,0xa14f6c8d,0xc7005e88,0x285aa017,0x1eb8ea13,0x36b9e63a,0x7c017620,
+     0x6754ffc4,0x6edc59a6,0x8d3fe79a,0xecbd7362,0x3ec2959a,0x4f18c323,0xc26d9cac,0x1c34122d,
+     0x2ffba206,0x7b2a9bc4,0x76add6c7,0x7f6db14f,0xa099d6f9,0x4185cfdf,0x6f9a1cce,0x7954a1cc,
+     0x256874fe,0x6a1c3ccc,0xc831af91,0x377a62eb,0x7b2a2011,0x9c74d139,0x464e2cc0,0x9b9aca22,
+     0x804fb790,0x45f9a37a,0x233cc12a,0x9406f91e,0x99a2a56c,0x10ccf59a,0x3e251ac0,0xd109d38a,
+     0x20bc40c6,0x8a6be6e8,0x45bfd43c,0xfb147a5c,0xb957f241,0x7dae0d6c,0xb5d99c75,0xb9b49faf,
+     0x436a1bda,0x93e7325b,0x14a9c5ae,0xaa3a574d,0x7dad5476,0x9f43c72e,0x48eb3c27,0xab40436c,
+     0xec5cd626,0x16e1a75a,0xf4ac1ebc,0x300fb6da,0xd6f1d918,0xcd1dd3cb,0xb23d0980,0xdc42048f,
+     0x1941393b,0x27b5c625,0x6b357541,0x19c6eca5,0x8bb57192,0xdd563fe4,0x4acc35d5,0xc88e5a83,
+     0x96be1be2,0xa8dc1c99,0x82af8227,0x2030e029,0x23ddedaf,0xf747f8b8,0x6ce95b74,0x8a814ec0,
+     0x51708ef3,0x689e7eee,0xd4b3bbec,0x74748fec,0xb46e85d2,0x5f611991,0x3f73cb43,0x2c38025b,
+     0xccb43a6c,0x9433e111,0xa85ce624,0xa630d25b,0x0e0f0000,0x32f5afca,0xdd3e4afd,0xc4584481,
+     0x4f086326,0xa455e47e,0xce2d83d7,0x2f3aac80,0x1c2479f9,0xfcfd5441,0xffa4e342,0xde449f2b,
+     0x3c93df27,0x7bd01b75,0x5d5b1d5e,0x4968ef0c,0x59e66f92,0xdb6f82cf,0x380fb5cb,0xd46c043d,
+     0xcb5b91c7,0xeaea623e,0x41640a7a,0x9aea0216,0x6540e744,0x0fea8e94,0x0fde32c2,0xac88c5a8,
+     0x0f7b8bc0,0x293c1a95,0x40e64e8e,0x855e59b4,0xe3e2e012,0x21464af3,0xd4b8ad77,0xb6957e97,
+     0x46c54225,0x30152c89,0x3595959d,0x40cadf8f,0x2b1d9d5b,0x06584ef6,0x3249e258,0xfc896584,
+     0xb4956582,0xe5c74fc2,0xba7d6fc4,0xaa77b6e1,0x8fcf7a22,0xafbb1461,0xa7dac258,0x9a0cc1f2,
+     0x0ed86a94,0x3011d113,0x0e9ea1b1,0xafc1c06b,0x5bfea6c8,0x7467078c,0x8fc80636,0x8583b347,
+     0x6e1c9d76,0x38672c5b,0x3c97e26a,0xdc01c207,0xb7c55744,0xb5ec8c6b,0xa84fdeaf,0x35d412d3,
+     0x6250ff76,0xcf682f3f,0xd352f32f,0xb66ac375,0xc4eec5c5,0xd3c2be37,0x80fcf29e,0x6de2550a,
+     0xd6355ed4,0xcb3cf1aa,0xe8efd320,0x026df4af,0x11028c0d,0x50d64ceb,0x2e8e3e4e,0x7e7d0f9e,
+     0xf19829d4,0xda416356,0x1e276946,0xc6149a88,0xbd6a5e68,0xa4a0a61f,0x19222ce0,0x22c42b67},
+    {0x8c8f2c44,0xad2d6f93,0x65d6f42b,0x470ba2cd,0xc29f5a55,0x3543bbd6,0x9123a4d4,0x72cb54e6,
+     0x5a84b56a,0x258e4dff,0xd67f1a5c,0x36ba520b,0xb3f835a6,0xfb307f68,0x49be6ca4,0x6a13c69b,
+     0x34f7abeb,0x90e19fcc,0x4b0c5f7d,0xc057c4e5,0xf21049b5,0xdd3d426a,0xaa9c7256,0x52015e1b,
+     0x2de6c77e,0x5b85cb12,0xa73fb4f8,0xf5439a10,0xb5d882b8,0x3b0f9c13,0x2ac08941,0x1e37b176,
+     0x6e0294be,0xcc7ce578,0xaa256bd9,0x1ed810f4,0xe5631653,0x1c6aad21,0xb8c4876b,0x55dc7b3e,
+     0x55497e1a,0x7bdf7cb0,0x8f003bc0,0xdb62e2b4,0xe0d9f5cb,0x951b303c,0xedd043bb,0x29a64d1f,
+     0xd09bd1c5,0xa14e94b6,0x20371ad3,0x5c260b2e,0xaa4d41f4,0x3a31be28,0x3d5f7ff3,0x8293f8b2,
+     0x10cfeef3,0x2ebacf60,0xfe4823dc,0xde9d8bde,0xd13f3e90,0x7b32918a,0xf54fa07b,0x001fcda8,
+     0xab50a2a9,0xaef9e616,0x4e272ba0,0xd779c1d2,0x62ddc9ef,0x594436f2,0x8b9dfe69,0x1d145af6,
+     0x1671cb7b,0xa0b094d9,0xbc6ec39e,0x792cedc7,0x4ec60b18,0xc93da6de,0xe5248424,0x47a9569d,
+     0x2398be3b,0xf25ace97,0x87546c2c,0x270ae234,0x98bc70d2,0xc9cb4af5,0x320cd871,0x0f8a4c6b,
+     0x5ef448c2,0xce7e108b,0xc05039d0,0x17d1d3d7,0x5001397b,0x72f30fe4,0xd6ba45ae,0x54e8bde2,
+     0x1bb4b7fa,0x53c9d01b,0xe5b76682,0xc4d7e5d7,0x7b4e382c,0x89d7edad,0x5313c485,0xe4e6effd,
+     0x77bfb1fe,0xfec50db6,0x089ac372,0xa36e957f,0x7bb2b606,0x30d0baa0,0x66dfa9be,0x7b9e165c,
+     0xd29b0fee,0x10ea267d,0x8d4c3ca3,0x5e63ff63,0x4d911d12,0x184b89a3,0xed14e139,0x7b9fce69,
+     0x8f05eaf0,0xfc7605d3,0x404a7e3b,0x2003790b,0xe4772049,0xe99b3941,0x5da5c2b4,0xd536cb5e,
+     0xfc7246be,0xb8a0796a,0xb10500aa,0x5f9f6e40,0x56b81ed1,0x378f651f,0x9b5b4968,0x2562a4aa,
+     0xe0a378d0,0xda5302bd,0x3c007e1a,0x559bffb1,0x3cbc8830,0x18e95e40,0x3d10a9b7,0x0ca94be0,
+     0x3d85c2d5,0x58d0b3eb,0xa7b68a5e,0xa125c6d4,0xa52d9091,0xd2383305,0xc8f13c94,0xc5e37e1a,
+     0xe0cea4d4,0x645faf3f,0xccc13371,0xf01252a8,0x6597db1a,0x4c40b59d,0xd08eafbb,0x68bf0624,
+     0x2e2bf88,0x6a1591cd,0xcbe59eaa,0x2a3929ac,0xe44fe456,0x40015a12,0x4695bcdb,0xe80e55b8,
+     0x60d79d5b,0x1a31e238,0xebe51c1a,0xaff3c92d,0x3937bed3,0xb350189d,0x50309856,0xc21100ec,
+     0xad01b377,0x6940455e,0x2fd82e3e,0x4db68a1b,0x8259df4e,0xbe63ecd7,0x2109a8f0,0x646dd7f8,
+     0xe94f0f19,0x941ae9aa,0x51a124b8,0xfa38e3e7,0xd4fd579e,0xb4be1ba2,0x4c6c542b,0x1d3cfa5e,
+     0x3f65c2b4,0xf23c22f7,0xfccf5384,0x469c28d0,0xeedb3f8f,0x3ad29aab,0xf9dbb1b2,0xd0f4d501,
+     0x4b71095b,0xd9093ba9,0x70b55199,0x1ca3f67c,0xaef4abe5,0xa4e35ddc,0x52e0b6ad,0x87c5f1a6,
+     0xf9130ea0,0xba2cfb7e,0xf740e0d7,0xa1088f1,0xa88e2e2f,0xd626c04c,0x71fe3662,0x342cb8b3,
+     0xec2198b5,0xa616bcf6,0xbc86e86d,0xab630a97,0xc70b4625,0x7ca2a24e,0xecb932c9,0xb34ce04b,
+     0x050e98b8,0x56d5277c,0x124a47cb,0x56918f47,0xc12a2650,0x4d0f3923,0xb8a15292,0xb312c1b6,
+     0x385a1db1,0xd5412af7,0x1c24d78e,0x7955ffbe,0x2b1c6a23,0xd2a62ae3,0xecc6f5b3,0x0e5e9a3b,
+     0x4f98e6ad,0xcdc9276e,0xcb11024f,0xbc7c2a5d,0x5ad1a0c9,0x99716dba,0xef1d91f2,0x31be2b9a,
+     0x475e3d5b,0x2779f226,0xd9c44f18,0x9bbc85cd,0x4bbdd819,0x4e793d62,0x66c3e649,0x567406fe},
+    {0xc3555657,0xfce233c9,0x8124e0bb,0x1763d0a3,0x23899ba8,0xbb43e0f6,0xe15e72f8,0xa9e21bcd,
+     0x7f9c7f05,0xf3278831,0x9b63ea06,0x0fa0d6a1,0x2f0c34b6,0x8b8494dc,0x3b349504,0x5dae1a35,
+     0x3ffe1e7d,0x7603d3d7,0x2c0d4671,0x1e65eb7d,0xf50d58f7,0x3bbf9a1a,0xd4fce210,0x92d50e8d,
+     0x8e53c538,0x988c96f6,0xa87fb44a,0x6cfe5824,0xd31cb90f,0x2ebda1c0,0x8fabb6c8,0xa0443a60,
+     0xb1d8b05e,0xb1985eb9,0xca7e941a,0x44d060b9,0x6be72dab,0x83658c87,0x3ebc1b10,0xcdcf6d70,
+     0x535d2f47,0xfb357450,0xfa1799d2,0x10faf556,0xaabf87d2,0x48064b0e,0x3d16579d,0x422299e3,
+     0xb8d74706,0x981a90c8,0xbd2316ce,0xda1da6ad,0xf1f80f24,0xed3f3e23,0x2e9a097b,0x6090c7e1,
+     0x868d294b,0x734e5cd6,0x3cd88147,0xc2485a1d,0xd4c68ba1,0xed5adaef,0xf7b5070c,0xda9d04cf,
+     0x0a46c7a0,0x2879e4d1,0xe6eb382e,0xb3860358,0x3cbff0ec,0x8a1b2f1a,0x89ea86be,0xa150320e,
+     0xb9cebfc0,0xac99b051,0x7ef3d158,0xc4adc7b6,0x5f2ffaac,0x8c7caba6,0x883f3ac0,0x0a285dc9,
+     0x35dd5292,0xfc3509f7,0x2763aa41,0xaa144398,0x87c594e4,0x9a953a5a,0x39bcefd6,0xe6655a05,
+     0xb1ee3402,0x9413106a,0x9f02671a,0xf503cf57,0x44b521b9,0x2a0f67e6,0x466886c3,0xf0d6a14e,
+     0x9eccfb0f,0x2d39e787,0x74e8c4c4,0x3f9be0ab,0x9ff3dfb6,0xe5e8f195,0xdd22b8b8,0x448c202b,
+     0x3e4ac757,0x3e08df53,0x3e11e9ea,0xe4f5239e,0x58b68157,0x8950bcd5,0xba2959fa,0x7d80dc45,
+     0x2eaa14e3,0xdc41923a,0x437e45d0,0x53dcad72,0x981a7c19,0x146101bc,0xee037979,0x374a727b,
+     0xc6516dc5,0x93f23e52,0xde954fa2,0x65e84120,0x8ae1031f,0xed25eefd,0x085f0fdf,0xc7353faa,
+     0xd7e5538b,0x55a8eff6,0x1bb3cb54,0x3a186670,0xf77b20ca,0x749646e4,0xffe56df0,0xc2c4ba03,
+     0x597c33eb,0x90f7e13b,0x4ce4683a,0x891778ab,0x9bc0377e,0x64e5e8eb,0x95ad2c42,0xaccf09cd,
+     0xf694d7bc,0x48b6d8f1,0x259e6f0b,0x83337790,0x63bc53a1,0x530fe54f,0xa6ae9c17,0x6cfb108e,
+     0x7f8795e8,0xcc434205,0xc6ea9241,0x9437e5d9,0x9bff244e,0x0a63bd11,0x475c9c87,0x8c3c03b0,
+     0xf2234e5a,0xa3a2c4d8,0x5f9b1e3d,0xadf8c15a,0x4b0c9c12,0xe4a79ef9,0xbb4d6c0b,0x90f0dd1e,
+     0xec66adf3,0x14d33e0a,0x12a93077,0x912111a2,0x1f02ae20,0xa2bb1f6c,0x2b3a3cd8,0x9d73e234,
+     0x72d353fb,0xfa2cf926,0xddc312f0,0x101733ff,0x637b89df,0x19d36111,0x4eb8709b,0xdf76853f,
+     0xed7a2a98,0x05eff0e3,0x7a5a60a8,0x2c7d217b,0x63694667,0xaa4ba302,0x09cd6348,0x3d24cfed,
+     0x0d91d78b,0xddd937d8,0x9ff38997,0x97c3a92e,0x14b8c6a3,0x3a706ada,0xfc55a4d9,0xa1443e7f}
+};
+
+static uint32_t BF_F(const uint32_t *sbox, uint32_t x) {
+    uint8_t a = (x >> 24) & 0xFF;
+    uint8_t b = (x >> 16) & 0xFF;
+    uint8_t c = (x >> 8) & 0xFF;
+    uint8_t d = x & 0xFF;
+    return (sbox[0*256 + a] + sbox[1*256 + b]) ^ (sbox[2*256 + c] + sbox[3*256 + d]);
+}
+
+static void blowfish_encrypt(uint32_t &L, uint32_t &R, const uint32_t *P, const uint32_t (*S)[256]) {
+    for (int i = 0; i < 16; i++) {
+        L ^= P[i];
+        R ^= BF_F(*S, L);
+        std::swap(L, R);
+    }
+    std::swap(L, R);
+    R ^= P[16];
+    L ^= P[17];
+}
+
+static void blowfish_expand_key(uint32_t *P, uint32_t (*S)[256], const uint8_t *key, size_t key_len, const uint8_t *salt, size_t salt_len) {
+    size_t j = 0;
+    for (int i = 0; i < 18; i++) {
+        uint32_t data = 0;
+        for (int k = 0; k < 4; k++) {
+            data = (data << 8) | key[j++ % key_len];
+        }
+        P[i] ^= data;
+    }
+
+    uint32_t L = 0, R = 0;
+    for (int i = 0; i < 18; i += 2) {
+        if (salt) {
+            L ^= ((uint32_t)salt[0] << 24) | ((uint32_t)salt[1] << 16) | ((uint32_t)salt[2] << 8) | salt[3];
+            R ^= ((uint32_t)salt[4] << 24) | ((uint32_t)salt[5] << 16) | ((uint32_t)salt[6] << 8) | salt[7];
+            salt += 8; salt_len -= 8;
+            if (salt_len == 0) { salt -= 8; salt_len = 8; }
+        }
+        blowfish_encrypt(L, R, P, S);
+        P[i] = L;
+        P[i+1] = R;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 256; j += 2) {
+            if (salt) {
+                L ^= ((uint32_t)salt[0] << 24) | ((uint32_t)salt[1] << 16) | ((uint32_t)salt[2] << 8) | salt[3];
+                R ^= ((uint32_t)salt[4] << 24) | ((uint32_t)salt[5] << 16) | ((uint32_t)salt[6] << 8) | salt[7];
+                salt += 8; salt_len -= 8;
+                if (salt_len == 0) { salt -= 8; salt_len = 8; }
+            }
+            blowfish_encrypt(L, R, P, S);
+            S[i][j] = L;
+            S[i][j+1] = R;
+        }
+    }
+}
+
+static void eksblowfish(uint32_t *P, uint32_t (*S)[256], const uint8_t *key, size_t key_len, const uint8_t *salt, size_t salt_len, uint32_t rounds) {
+    blowfish_expand_key(P, S, key, key_len, salt, salt_len);
+    for (uint32_t r = 0; r < rounds; r++) {
+        blowfish_expand_key(P, S, key, key_len, nullptr, 0);
+        blowfish_expand_key(P, S, salt, salt_len, nullptr, 0);
+    }
+}
+
+static const char BF_BASE64[65] = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+static void bf_encode(uint8_t *data, size_t len, std::string &out) {
+    for (size_t i = 0; i < len; ) {
+        uint32_t v = 0;
+        int bits = 0;
+        while (bits < 24 && i < len) {
+            v = (v << 8) | data[i++];
+            bits += 8;
+        }
+        int remain = bits;
+        while (remain > 0) {
+            remain -= 6;
+            out += BF_BASE64[(v >> remain) & 0x3F];
+        }
+    }
+}
+
+bool bcrypt_hash(const std::string &password, const std::string &salt, uint32_t rounds, std::string &output) {
+    if (rounds < 4 || rounds > 31) return false;
+    if (salt.size() != 16) return false;
+
+    uint32_t P[18];
+    uint32_t S[4][256];
+    memcpy(P, BF_P_DEFAULT, sizeof(P));
+    memcpy(S, BF_S_DEFAULT, sizeof(S));
+
+    std::string pw = password;
+    if (pw.size() < 72) pw.append(72 - pw.size(), '\0');
+    if (pw.size() > 72) pw.resize(72);
+
+    eksblowfish(P, S, (const uint8_t*)pw.data(), pw.size(), (const uint8_t*)salt.data(), salt.size(), rounds);
+
+    // Encrypt "OrpheanBeholderScryDoubt" 64 times
+    const char *magic = "OrpheanBeholderScryDoubt";
+    uint32_t L = ((uint32_t)magic[0] << 24) | ((uint32_t)magic[1] << 16) | ((uint32_t)magic[2] << 8) | magic[3];
+    uint32_t R = ((uint32_t)magic[4] << 24) | ((uint32_t)magic[5] << 16) | ((uint32_t)magic[6] << 8) | magic[7];
+    uint32_t L2 = ((uint32_t)magic[8] << 24) | ((uint32_t)magic[9] << 16) | ((uint32_t)magic[10] << 8) | magic[11];
+    uint32_t R2 = ((uint32_t)magic[12] << 24) | ((uint32_t)magic[13] << 16) | ((uint32_t)magic[14] << 8) | magic[15];
+    uint32_t L3 = ((uint32_t)magic[16] << 24) | ((uint32_t)magic[17] << 16) | ((uint32_t)magic[18] << 8) | magic[19];
+    uint32_t R3 = ((uint32_t)magic[20] << 24) | ((uint32_t)magic[21] << 16) | ((uint32_t)magic[22] << 8) | magic[23];
+
+    for (int i = 0; i < 64; i++) {
+        blowfish_encrypt(L, R, P, S);
+        blowfish_encrypt(L2, R2, P, S);
+        blowfish_encrypt(L3, R3, P, S);
+    }
+
+    uint8_t hash[24];
+    // Convert to little-endian bytes
+    for (int i = 0; i < 4; i++) {
+        hash[i] = (L >> (i * 8)) & 0xFF;
+        hash[4+i] = (R >> (i * 8)) & 0xFF;
+        hash[8+i] = (L2 >> (i * 8)) & 0xFF;
+        hash[12+i] = (R2 >> (i * 8)) & 0xFF;
+        hash[16+i] = (L3 >> (i * 8)) & 0xFF;
+        hash[20+i] = (R3 >> (i * 8)) & 0xFF;
+    }
+
+    output = "$2b$";
+    if (rounds < 10) output += "0";
+    output += std::to_string(rounds) + "$";
+    bf_encode((uint8_t*)salt.data(), 16, output);
+    bf_encode(hash, 23, output);
+    return true;
+}
+
+// ── scrypt ────────────────────────────────────────────────────────────────
+static uint32_t scrypt_rotl(uint32_t x, int n) {
+    return (x << n) | (x >> (32 - n));
+}
+
+static void salsa20_8_core(uint32_t out[16], const uint32_t in[16]) {
+    uint32_t x[16];
+    memcpy(x, in, 64);
+    for (int i = 0; i < 8; i++) {
+        x[4] ^= scrypt_rotl(x[0] + x[12], 7);  x[8] ^= scrypt_rotl(x[4] + x[0], 9);
+        x[12] ^= scrypt_rotl(x[8] + x[4], 13); x[0] ^= scrypt_rotl(x[12] + x[8], 18);
+        x[9] ^= scrypt_rotl(x[5] + x[1], 7);   x[13] ^= scrypt_rotl(x[9] + x[5], 9);
+        x[1] ^= scrypt_rotl(x[13] + x[9], 13); x[5] ^= scrypt_rotl(x[1] + x[13], 18);
+        x[14] ^= scrypt_rotl(x[10] + x[6], 7); x[2] ^= scrypt_rotl(x[14] + x[10], 9);
+        x[6] ^= scrypt_rotl(x[2] + x[14], 13); x[10] ^= scrypt_rotl(x[6] + x[2], 18);
+        x[3] ^= scrypt_rotl(x[15] + x[11], 7); x[7] ^= scrypt_rotl(x[3] + x[15], 9);
+        x[11] ^= scrypt_rotl(x[7] + x[3], 13); x[15] ^= scrypt_rotl(x[11] + x[7], 18);
+        x[1] ^= scrypt_rotl(x[0] + x[3], 7);   x[2] ^= scrypt_rotl(x[1] + x[0], 9);
+        x[3] ^= scrypt_rotl(x[2] + x[1], 13);  x[0] ^= scrypt_rotl(x[3] + x[2], 18);
+        x[6] ^= scrypt_rotl(x[5] + x[4], 7);   x[7] ^= scrypt_rotl(x[6] + x[5], 9);
+        x[4] ^= scrypt_rotl(x[7] + x[6], 13);  x[5] ^= scrypt_rotl(x[4] + x[7], 18);
+        x[11] ^= scrypt_rotl(x[10] + x[9], 7); x[8] ^= scrypt_rotl(x[11] + x[10], 9);
+        x[9] ^= scrypt_rotl(x[8] + x[11], 13); x[10] ^= scrypt_rotl(x[9] + x[8], 18);
+        x[12] ^= scrypt_rotl(x[15] + x[14], 7); x[13] ^= scrypt_rotl(x[12] + x[15], 9);
+        x[14] ^= scrypt_rotl(x[13] + x[12], 13); x[15] ^= scrypt_rotl(x[14] + x[13], 18);
+    }
+    for (int i = 0; i < 16; i++) out[i] = x[i] + in[i];
+}
+
+static void scrypt_block_mix(uint8_t *B, size_t r) {
+    uint32_t X[16];
+    memcpy(X, B + (2*r - 1) * 64, 64);
+    for (size_t i = 0; i < 2*r; i++) {
+        uint32_t Y[16];
+        for (int j = 0; j < 16; j++)
+            Y[j] = ((uint32_t*)B)[i*16 + j] ^ X[j];
+        salsa20_8_core(X, Y);
+        memcpy(B + (i/2 + (i%2)*r) * 64, X, 64);
+    }
+}
+
+static void scrypt_romix(uint8_t *B, size_t r, uint32_t N) {
+    size_t block_bytes = 128 * r;
+    std::vector<uint8_t> V(N * block_bytes);
+    for (uint32_t i = 0; i < N; i++) {
+        memcpy(&V[i * block_bytes], B, block_bytes);
+        scrypt_block_mix(B, r);
+    }
+    for (uint32_t i = 0; i < N; i++) {
+        uint32_t j = ((uint32_t*)B)[(2*r - 1) * 4] & (N - 1);
+        for (size_t k = 0; k < block_bytes / 4; k++)
+            ((uint32_t*)B)[k] ^= ((uint32_t*)&V[j * block_bytes])[k];
+        scrypt_block_mix(B, r);
+    }
+}
+
+bool scrypt_hash(const std::string &password, const std::string &salt, uint32_t N, uint32_t r, uint32_t p, uint32_t dkLen, std::string &output) {
+    if (N < 2 || (N & (N - 1)) != 0) return false;
+
+    // Step 1: B = PBKDF2-HMAC-SHA256(password, salt, 1, p * 128 * r)
+    std::string B;
+    pbkdf2_sha256(password, salt, 1, p * 128 * r, B);
+    std::string B_raw = from_hex(B);
+
+    // Step 2: ROMix each block
+    for (uint32_t i = 0; i < p; i++) {
+        scrypt_romix((uint8_t*)B_raw.data() + i * 128 * r, r, N);
+    }
+
+    // Step 3: DK = PBKDF2-HMAC-SHA256(password, B', 1, dkLen)
+    pbkdf2_sha256(password, B_raw, 1, dkLen, output);
+    return true;
+}
+
+void weak_kdf_demo(const std::string &password, const std::string &salt, uint32_t iterations, uint32_t memory_kb, uint32_t key_len, std::string &output) {
+    std::string state = password + salt;
+    for (uint32_t iter = 0; iter < iterations; ++iter) {
+        std::string round_input = state + std::to_string(iter) + std::to_string(memory_kb);
+        std::string hash_out;
+        blake2b_hash(round_input, hash_out);
+        state = hash_out;
+    }
+    output = state.substr(0, key_len * 2);
 }
 
 // BLAKE2s & BLAKE2b implementation
@@ -1225,6 +1769,167 @@ bool aes_decrypt(const std::string &ciphertext, const std::string &key, const st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AES-GCM Authenticated Encryption
+// ─────────────────────────────────────────────────────────────────────────────
+
+static void gcm_inc32(uint8_t *block) {
+    for (int i = 15; i >= 12; --i)
+        if (++block[i] != 0) break;
+}
+
+static void gcm_gf_mul(uint8_t *x, const uint8_t *y) {
+    uint8_t z[16] = {0};
+    uint8_t v[16];
+    memcpy(v, y, 16);
+    for (int i = 0; i < 128; i++) {
+        if (x[i >> 3] & (0x80 >> (i & 7)))
+            for (int j = 0; j < 16; j++) z[j] ^= v[j];
+        uint8_t lsb = v[15] & 1;
+        for (int j = 15; j > 0; j--) v[j] = (v[j] >> 1) | (v[j-1] << 7);
+        v[0] >>= 1;
+        if (lsb) v[0] ^= 0xE1;
+    }
+    memcpy(x, z, 16);
+}
+
+static void gcm_ghash(const uint8_t *H, const uint8_t *aad, size_t aad_len,
+                      const uint8_t *ciphertext, size_t ct_len, uint8_t *out) {
+    uint8_t y[16] = {0};
+    uint8_t block[16];
+
+    auto process_block = [&](const uint8_t *data, size_t len) {
+        for (size_t off = 0; off < len; off += 16) {
+            size_t chunk = (len - off < 16) ? (len - off) : 16;
+            memset(block, 0, 16);
+            memcpy(block, data + off, chunk);
+            for (int i = 0; i < 16; i++) y[i] ^= block[i];
+            gcm_gf_mul(y, H);
+        }
+    };
+
+    process_block(aad, aad_len);
+    process_block(ciphertext, ct_len);
+
+    uint64_t aad_bits = (uint64_t)aad_len * 8;
+    uint64_t ct_bits = (uint64_t)ct_len * 8;
+    for (int i = 0; i < 8; i++) {
+        y[i] ^= (uint8_t)((aad_bits >> (56 - i * 8)) & 0xFF);
+        y[i+8] ^= (uint8_t)((ct_bits >> (56 - i * 8)) & 0xFF);
+    }
+    gcm_gf_mul(y, H);
+    memcpy(out, y, 16);
+}
+
+bool aes_gcm_encrypt(const std::string &plaintext, const std::string &key,
+                     const std::string &iv, const std::string &aad,
+                     std::string &ciphertext, std::string &tag) {
+    int key_len = (int)key.size();
+    if (key_len != 16 && key_len != 32) return false;
+    if (iv.empty()) return false;
+    int Nr = (key_len == 16) ? 10 : 14;
+
+    uint32_t w[60];
+    KeyExpansion((const uint8_t*)key.data(), key_len, w);
+
+    // H = AES_K(0^128)
+    uint8_t H[16] = {0};
+    AES_EncryptBlock(H, w, Nr);
+
+    // J0
+    uint8_t J0[16] = {0};
+    if (iv.size() == 12) {
+        memcpy(J0, iv.data(), 12);
+        J0[15] = 1;
+    } else {
+        gcm_ghash(H, (const uint8_t*)iv.data(), iv.size(), nullptr, 0, J0);
+    }
+
+    // Encrypt: AES-CTR with start = inc32(J0)
+    uint8_t counter[16];
+    memcpy(counter, J0, 16);
+    gcm_inc32(counter);
+
+    ciphertext.resize(plaintext.size());
+    uint8_t ks[16];
+    for (size_t offset = 0; offset < plaintext.size(); offset += 16) {
+        AES_EncryptBlock(counter, w, Nr);
+        memcpy(ks, counter, 16);
+        gcm_inc32(counter);
+        size_t chunk = plaintext.size() - offset;
+        if (chunk > 16) chunk = 16;
+        for (size_t i = 0; i < chunk; i++)
+            ciphertext[offset + i] = plaintext[offset + i] ^ ks[i];
+    }
+
+    // Tag = GHASH(AAD, ciphertext) XOR AES_K(J0)
+    uint8_t ghash_out[16];
+    gcm_ghash(H, (const uint8_t*)aad.data(), aad.size(),
+              (const uint8_t*)ciphertext.data(), ciphertext.size(), ghash_out);
+    uint8_t ek0[16];
+    memcpy(ek0, J0, 16);
+    AES_EncryptBlock(ek0, w, Nr);
+    for (int i = 0; i < 16; i++)
+        ghash_out[i] ^= ek0[i];
+    tag.assign((char*)ghash_out, 16);
+    return true;
+}
+
+bool aes_gcm_decrypt(const std::string &ciphertext, const std::string &key,
+                     const std::string &iv, const std::string &aad,
+                     const std::string &tag, std::string &plaintext) {
+    int key_len = (int)key.size();
+    if (key_len != 16 && key_len != 32) return false;
+    if (iv.empty() || tag.size() != 16) return false;
+    int Nr = (key_len == 16) ? 10 : 14;
+
+    uint32_t w[60];
+    KeyExpansion((const uint8_t*)key.data(), key_len, w);
+
+    // H = AES_K(0^128)
+    uint8_t H[16] = {0};
+    AES_EncryptBlock(H, w, Nr);
+
+    // J0
+    uint8_t J0[16] = {0};
+    if (iv.size() == 12) {
+        memcpy(J0, iv.data(), 12);
+        J0[15] = 1;
+    } else {
+        gcm_ghash(H, (const uint8_t*)iv.data(), iv.size(), nullptr, 0, J0);
+    }
+
+    // Verify tag first
+    uint8_t ghash_out[16];
+    gcm_ghash(H, (const uint8_t*)aad.data(), aad.size(),
+              (const uint8_t*)ciphertext.data(), ciphertext.size(), ghash_out);
+    uint8_t ek0[16];
+    memcpy(ek0, J0, 16);
+    AES_EncryptBlock(ek0, w, Nr);
+    for (int i = 0; i < 16; i++)
+        ghash_out[i] ^= ek0[i];
+    if (memcmp(ghash_out, tag.data(), 16) != 0)
+        return false;
+
+    // Decrypt: AES-CTR with start = inc32(J0)
+    uint8_t counter[16];
+    memcpy(counter, J0, 16);
+    gcm_inc32(counter);
+
+    plaintext.resize(ciphertext.size());
+    uint8_t ks[16];
+    for (size_t offset = 0; offset < ciphertext.size(); offset += 16) {
+        AES_EncryptBlock(counter, w, Nr);
+        memcpy(ks, counter, 16);
+        gcm_inc32(counter);
+        size_t chunk = ciphertext.size() - offset;
+        if (chunk > 16) chunk = 16;
+        for (size_t i = 0; i < chunk; i++)
+            plaintext[offset + i] = ciphertext[offset + i] ^ ks[i];
+    }
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ChaCha20 Stream Cipher
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1651,69 +2356,6 @@ bool lsb_embed(const std::string &carrier_data, const std::string &text_to_embed
     return true;
 }
 
-// ── ASN.1 / DER helpers (static) ─────────────────────────────────
-
-struct Asn1Element {
-    uint8_t tag;
-    std::string value;
-    size_t total = 0;
-};
-
-static Asn1Element asn1_read(const std::string &der, size_t off) {
-    Asn1Element el;
-    if (off >= der.size()) return el;
-    el.tag = (uint8_t)der[off++];
-    el.total = 1;
-    if (off >= der.size()) { el.total = 0; return el; }
-    uint8_t len_byte = (uint8_t)der[off++];
-    el.total++;
-    size_t length = 0;
-    if (len_byte < 0x80) {
-        length = len_byte;
-    } else {
-        uint8_t num_bytes = len_byte & 0x7F;
-        if (num_bytes > 8 || off + num_bytes > der.size()) { el.total = 0; return el; }
-        for (uint8_t i = 0; i < num_bytes; i++) {
-            length = (length << 8) | (uint8_t)der[off++];
-            el.total++;
-        }
-    }
-    if (off + length > der.size()) { el.total = 0; return el; }
-    el.value = der.substr(off, length);
-    el.total += length;
-    return el;
-}
-
-static std::string oid_to_string(const std::string &o) {
-    if (o.empty()) return "";
-    std::string r;
-    uint8_t first = (uint8_t)o[0];
-    r = std::to_string(first / 40) + "." + std::to_string(first % 40);
-    uint64_t val = 0;
-    for (size_t i = 1; i < o.size(); i++) {
-        uint8_t b = (uint8_t)o[i];
-        val = (val << 7) | (b & 0x7F);
-        if (!(b & 0x80)) { r += "." + std::to_string(val); val = 0; }
-    }
-    return r;
-}
-
-static std::string parse_utf8_or_string(const std::string &v) {
-    return v;
-}
-
-static bool is_hex_string(const std::string &s) {
-    if (s.empty()) return false;
-    for (char c : s) if (!isxdigit((unsigned char)c) && c != ' ' && c != '\n' && c != '\r' && c != '\t') return false;
-    return true;
-}
-
-static std::string strip_spaces(const std::string &s) {
-    std::string r;
-    for (char c : s) if (c != ' ' && c != '\n' && c != '\r' && c != '\t') r += c;
-    return r;
-}
-
 // ── TLS Fingerprint ──────────────────────────────────────────────
 
 TlsFingerprint tls_fingerprint(const std::string &input) {
@@ -1872,105 +2514,6 @@ TlsFingerprint tls_fingerprint(const std::string &input) {
     return fp;
 }
 
-// ── OID table for X.509 parsing ──────────────────────────────────
-
-struct OidEntry { const char *dots; const char *label; };
-static const OidEntry OID_TABLE[] = {
-    {"2.5.4.3", "CN"},
-    {"2.5.4.4", "SN"},
-    {"2.5.4.5", "serialNumber"},
-    {"2.5.4.6", "C"},
-    {"2.5.4.7", "L"},
-    {"2.5.4.8", "ST"},
-    {"2.5.4.9", "STREET"},
-    {"2.5.4.10", "O"},
-    {"2.5.4.11", "OU"},
-    {"2.5.4.12", "title"},
-    {"2.5.4.17", "postalCode"},
-    {"2.5.4.42", "GN"},
-    {"2.5.4.43", "initials"},
-    {"1.2.840.113549.1.9.1", "emailAddress"},
-    {"1.2.840.113549.1.1.1", "RSA"},
-    {"1.2.840.10045.2.1", "EC"},
-    {"1.2.840.113549.1.1.5", "sha1WithRSA"},
-    {"1.2.840.113549.1.1.11", "sha256WithRSA"},
-    {"1.2.840.113549.1.1.12", "sha384WithRSA"},
-    {"1.2.840.113549.1.1.13", "sha512WithRSA"},
-    {"1.2.840.10045.4.3.2", "ecdsaWithSHA256"},
-    {"1.2.840.10045.4.3.3", "ecdsaWithSHA384"},
-    {"1.3.101.112", "ed25519"},
-    {"1.3.101.113", "ed448"},
-    {"2.5.29.15", "Key Usage"},
-    {"2.5.29.17", "Subject Alt Name"},
-    {"2.5.29.19", "Basic Constraints"},
-    {"2.5.29.37", "Extended Key Usage"},
-    {"2.5.29.14", "Subject Key Identifier"},
-    {"2.5.29.35", "Authority Key Identifier"},
-    {nullptr, nullptr}
-};
-
-static std::string oid_lookup(const std::string &oid_bytes) {
-    std::string dots = oid_to_string(oid_bytes);
-    for (int i = 0; OID_TABLE[i].dots != nullptr; i++) {
-        if (dots == OID_TABLE[i].dots) return OID_TABLE[i].label;
-    }
-    return dots;
-}
-
-// ── ASN.1 time helpers ───────────────────────────────────────────
-
-static std::string parse_utctime(const std::string &v) {
-    if (v.size() < 11) return v;
-    int yy = std::stoi(v.substr(0, 2));
-    if (yy < 50) yy += 2000; else yy += 1900;
-    return std::to_string(yy) + "-" + v.substr(2, 2) + "-" + v.substr(4, 2) + " " +
-           v.substr(6, 2) + ":" + v.substr(8, 2) + ":" + v.substr(10, 2) + " UTC";
-}
-
-static std::string parse_generalized_time(const std::string &v) {
-    if (v.size() < 13) return v;
-    return v.substr(0, 4) + "-" + v.substr(4, 2) + "-" + v.substr(6, 2) + " " +
-           v.substr(8, 2) + ":" + v.substr(10, 2) + ":" + v.substr(12, 2) + " UTC";
-}
-
-// ── Certificate Parser ───────────────────────────────────────────
-
-static void parse_rdn_sequence(const std::string &seq_val, std::string &cn, std::string &o, std::string &ou) {
-    size_t off = 0;
-    while (off < seq_val.size()) {
-        Asn1Element rdn_set = asn1_read(seq_val, off);
-        if (rdn_set.total == 0) break;
-        off += rdn_set.total;
-        size_t soff = 0;
-        while (soff < rdn_set.value.size()) {
-            Asn1Element attr_seq = asn1_read(rdn_set.value, soff);
-            if (attr_seq.total == 0) break;
-            soff += attr_seq.total;
-            if (attr_seq.tag == 0x30) {
-                Asn1Element oid_el = asn1_read(attr_seq.value, 0);
-                if (oid_el.tag == 0x06) {
-                    std::string label = oid_lookup(oid_el.value);
-                    size_t val_off = oid_el.total;
-                    Asn1Element val_el = asn1_read(attr_seq.value, val_off);
-                    std::string str_val = parse_utf8_or_string(val_el.value);
-                    if (label == "CN") { if (cn.empty()) cn = str_val; }
-                    else if (label == "O") { if (o.empty()) o = str_val; }
-                    else if (label == "OU") { if (ou.empty()) ou = str_val; }
-                }
-            }
-        }
-    }
-}
-
-static std::string parse_name(const std::string &seq_val) {
-    std::string cn, o, ou;
-    parse_rdn_sequence(seq_val, cn, o, ou);
-    std::string r;
-    if (!cn.empty()) r += "CN=" + cn;
-    if (!o.empty()) { if (!r.empty()) r += ", "; r += "O=" + o; }
-    if (!ou.empty()) { if (!r.empty()) r += ", "; r += "OU=" + ou; }
-    return r.empty() ? "(unable to parse)" : r;
-}
 
 CertInfo parse_certificate(const std::string &pem_or_hex) {
     CertInfo ci;

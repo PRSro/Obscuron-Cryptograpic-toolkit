@@ -23,6 +23,8 @@ __all__ = [
     "columnar_encrypt", "columnar_decrypt",
     "playfair", "bifid_encrypt", "bifid_decrypt", "build_bifid_grid",
     "trifid", "four_square", "adfgvx", "bacon",
+    "porta", "gronsfeld", "hill_encrypt", "hill_decrypt",
+    "nihilist_encrypt", "nihilist_decrypt",
     "morse_encode", "morse_decode",
     "braille_to_dots", "braille_print_dots",
     "simple_dots_to_braille", "braille_to_simple_dots",
@@ -51,7 +53,9 @@ __all__ = [
     "brute_caesar_all", "brute_railfence_all",
     "brute_xor_single_byte", "brute_vigenere_keylength",
     # modern_ciphers (hashes)
-    "md5_hash", "sha1_hash", "sha256_hash", "sha512_hash",
+    "md5_hash", "sha1_hash", "sha256_hash", "sha384_hash", "sha512_hash",
+    "sha3_224_hash", "sha3_256_hash", "sha3_384_hash", "sha3_512_hash",
+    "shake128_hash", "shake256_hash",
     "blake2b_hash", "blake2s_hash",
     "hmac_sha256", "hmac_sha512",
     # modern_ciphers (symmetric)
@@ -59,6 +63,7 @@ __all__ = [
     "chacha20_crypt", "poly1305_mac",
     # modern_ciphers (KDF)
     "pbkdf2_sha256", "argon2id_hash",
+    "bcrypt_hash", "scrypt_hash",
     # modern_ciphers (JWT, QR, stego)
     "jwt_sign", "jwt_parse",
     "generate_qr_matrix",

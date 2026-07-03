@@ -2,36 +2,43 @@ QT += widgets qml
 
 CONFIG += c++17
 
-INCLUDEPATH += ../CLI/includes
+INCLUDEPATH += ../CLI/includes include
 
 # NTL / GMP integration
 NTL_INCLUDE = /usr/include
 INCLUDEPATH += $$NTL_INCLUDE
-LIBS += -lntl -lm -ldl
+INCLUDEPATH += /usr/include/python3.14
+LIBS += -lntl -lm -ldl -lpython3.14
 
 SOURCES += \
-    main.cpp \
-    mainwindow.cpp \
-    menuwindow.cpp \
-    basewindow.cpp \
-    numberwindow.cpp \
-    passivewindow.cpp \
-    recipe_engine.cpp \
-    recipe_model.cpp \
-    recipe_commands.cpp \
-    visualizer_widgets.cpp \
-    theme_manager.cpp \
-    advanced_number_dialog.cpp \
-    advanced_crypt_dialog.cpp \
-    rsa_attack_dialog.cpp \
-    tls_attack_dialog.cpp \
-    settings_dialog.cpp \
-    toast_widget.cpp \
-    command_palette.cpp \
-    plugin_loader.cpp \
-    plugin_browser_dialog.cpp \
-    script_engine.cpp \
-    script_console_dialog.cpp \
+    src/main.cpp \
+    src/mainwindow.cpp \
+    src/menuwindow.cpp \
+    src/basewindow.cpp \
+    src/numberwindow.cpp \
+    src/passivewindow.cpp \
+    src/solve_window.cpp \
+    src/sage_runner.cpp \
+    src/terminal_widget.cpp \
+    src/solve_ctf_panel.cpp \
+    src/recipe_engine.cpp \
+    src/recipe_model.cpp \
+    src/recipe_commands.cpp \
+    src/visualizer_widgets.cpp \
+    src/theme_manager.cpp \
+    src/advanced_number_dialog.cpp \
+    src/advanced_crypt_dialog.cpp \
+    src/rsa_attack_dialog.cpp \
+    src/tls_attack_dialog.cpp \
+    src/settings_dialog.cpp \
+    src/toast_widget.cpp \
+    src/command_palette.cpp \
+    src/plugin_loader.cpp \
+    src/plugin_browser_dialog.cpp \
+    src/script_engine.cpp \
+    src/script_console_dialog.cpp \
+    src/plugin_crypto_bridge.cpp \
+    src/py_plugin_host.cpp \
     ../CLI/src/modern_ciphers.cpp \
     ../CLI/src/ntl_bridge.cpp \
     ../CLI/src/basic_ciphers.cpp \
@@ -46,32 +53,39 @@ SOURCES += \
     ../CLI/src/quadgram.cpp \
     ../CLI/src/branch_explorer.cpp \
     ../CLI/src/pcap_reader.cpp \
-    ../CLI/src/register_tls.cpp
+    ../CLI/src/register_tls.cpp \
+    ../CLI/src/asn1.cpp
 
 HEADERS += \
-    colours.h \
-    includes.h \
-    mainwindow.h \
-    menuwindow.h \
-    basewindow.h \
-    numberwindow.h \
-    passivewindow.h \
-    recipe_engine.h \
-    recipe_model.h \
-    recipe_commands.h \
-    visualizer_widgets.h \
-    theme_manager.h \
-    advanced_number_dialog.h \
-    advanced_crypt_dialog.h \
-    rsa_attack_dialog.h \
-    tls_attack_dialog.h \
-    settings_dialog.h \
-    toast_widget.h \
-    command_palette.h \
-    plugin_loader.h \
-    plugin_browser_dialog.h \
-    script_engine.h \
-    script_console_dialog.h \
+    include/colours.h \
+    include/includes.h \
+    include/mainwindow.h \
+    include/menuwindow.h \
+    include/basewindow.h \
+    include/numberwindow.h \
+    include/passivewindow.h \
+    include/solve_window.h \
+    include/sage_runner.h \
+    include/terminal_widget.h \
+    include/solve_ctf_panel.h \
+    include/recipe_engine.h \
+    include/recipe_model.h \
+    include/recipe_commands.h \
+    include/visualizer_widgets.h \
+    include/theme_manager.h \
+    include/advanced_number_dialog.h \
+    include/advanced_crypt_dialog.h \
+    include/rsa_attack_dialog.h \
+    include/tls_attack_dialog.h \
+    include/settings_dialog.h \
+    include/toast_widget.h \
+    include/command_palette.h \
+    include/plugin_loader.h \
+    include/plugin_browser_dialog.h \
+    include/script_engine.h \
+    include/script_console_dialog.h \
+    include/plugin_crypto_bridge.h \
+    include/py_plugin_host.h \
     ../CLI/includes/modern_ciphers.h \
     ../CLI/includes/basic.h \
     ../CLI/includes/basic_ciphers.h \
@@ -88,7 +102,8 @@ HEADERS += \
     ../CLI/includes/branch_explorer.h \
     ../CLI/includes/pcap_reader.h \
     ../CLI/includes/detector_helpers.h \
-    ../CLI/includes/plugin_api.h
+    ../CLI/includes/plugin_api.h \
+    ../CLI/includes/asn1.h
 
 FORMS +=
 

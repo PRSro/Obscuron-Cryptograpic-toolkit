@@ -74,15 +74,21 @@ void register_historical_handlers(HandlerMap &map) {
 
     map["bifid"] = [](const Context &ctx) {
         std::string k = ctx.opt_flag("-k", "ABCDEFGHIKLMNOPQRSTUVWXYZ");
-        char grid[6][6]; int row_of[256], col_of[256];
+        char grid[6][6] = {}; int row_of[256] = {}, col_of[256] = {};
         std::string rows[5];
         for (int r = 0; r < 5; r++) rows[r] = k.substr(r * 5, 5);
         build_bifid_grid(rows, grid, row_of, col_of);
+        std::string input;
+        for (char c : ctx.input) {
+            if (c >= 'a' && c <= 'z') c = c-'a'+'A';
+            if (c == 'J') c = 'I';
+            if (c >= 'A' && c <= 'Z') input += c;
+        }
         std::string out;
         if (ctx.has("--decrypt"))
-            bifid_decrypt(ctx.input, out, grid, row_of, col_of);
+            bifid_decrypt(input, out, grid, row_of, col_of);
         else
-            bifid_encrypt(ctx.input, out, grid, row_of, col_of);
+            bifid_encrypt(input, out, grid, row_of, col_of);
         print_result(ctx, out);
     };
 
@@ -182,6 +188,43 @@ void register_historical_handlers(HandlerMap &map) {
             braille_decode(ctx.input, out);
         else
             braille_encode(ctx.input, out);
+        print_result(ctx, out);
+    };
+
+    map["porta"] = [](const Context &ctx) {
+        std::string out;
+        porta(ctx.input, ctx.flag("-k"), out);
+        print_result(ctx, out);
+    };
+
+    map["gronsfeld"] = [](const Context &ctx) {
+        std::string out;
+        gronsfeld(ctx.input, ctx.flag("-k"), out, !ctx.has("--decrypt"));
+        print_result(ctx, out);
+    };
+
+    map["hill"] = [](const Context &ctx) {
+        std::string out;
+        int a = ctx.opt_int_flag("-a", 5);
+        int b = ctx.opt_int_flag("-b", 7);
+        int c = ctx.opt_int_flag("-c", 3);
+        int d = ctx.opt_int_flag("-d", 11);
+        bool ok;
+        if (ctx.has("--decrypt"))
+            ok = hill_decrypt(ctx.input, out, a, b, c, d);
+        else
+            ok = hill_encrypt(ctx.input, out, a, b, c, d);
+        if (!ok)
+            throw CipherError("Hill cipher: key matrix is not invertible modulo 26");
+        print_result(ctx, out);
+    };
+
+    map["nihilist"] = [](const Context &ctx) {
+        std::string out;
+        if (ctx.has("--decrypt"))
+            nihilist_decrypt(ctx.input, out, ctx.flag("-k"));
+        else
+            nihilist_encrypt(ctx.input, out, ctx.flag("-k"));
         print_result(ctx, out);
     };
 }

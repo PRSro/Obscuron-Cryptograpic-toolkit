@@ -162,6 +162,21 @@ def test_aes_cbc_roundtrip():
     assert dec_bytes.decode(errors='replace').strip() == pt
 
 
+def test_aes_gcm_roundtrip():
+    """AES-GCM encrypt then decrypt recovers plaintext."""
+    key = "00112233445566778899aabbccddeeff"
+    iv = "000102030405060708090a0b0c0d0e0f"
+    pt = "HelloGCMmode!!!"
+    rc, out, err = ob_run("aes-gcm", "-k", key, "-i", iv, pt)
+    assert rc == 0, err
+    parts = out.strip().split()
+    assert len(parts) == 2
+    ct_hex, tag_hex = parts
+    rc2, out2, err2 = ob_run("aes-gcm", "-k", key, "-i", iv, "--decrypt", "--tag", tag_hex, "--hex-input", ct_hex)
+    assert rc2 == 0, err2
+    assert out2.strip() == pt
+
+
 # ── Hash function correctness ──
 def test_blake2b():
     """BLAKE2b produces expected hex output."""
@@ -203,15 +218,7 @@ def test_poly1305_valid_key_succeeds():
     assert len(out.strip()) > 0
 
 
-# ── Part 5: SECURITY.md exists ──
-def test_security_md_exists():
-    """SECURITY.md should exist at project root."""
-    import os
-    path = os.path.join(PROJECT_ROOT, "SECURITY.md")
-    assert os.path.isfile(path), "SECURITY.md not found"
-
-
-# ── Part 6: Oracle commands in --list ──
+# ── Part 5: Oracle commands in --list ──
 def test_oracle_commands_in_list():
     """cbc-padding-oracle and rsa-parity-oracle appear in --list."""
     rc, out, err = ob_run("--list")

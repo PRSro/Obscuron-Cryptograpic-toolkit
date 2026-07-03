@@ -13,6 +13,8 @@ HandlerMap register_all_handlers() {
     register_detector_handlers(map);
     register_rsa_handlers(map);
     register_attack_handlers(map);
+    register_asn1_handlers(map);
+    register_signature_handlers(map);
     register_tls_handlers(map);
     return map;
 }

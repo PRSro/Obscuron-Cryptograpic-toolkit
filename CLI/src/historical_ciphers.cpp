@@ -2,6 +2,8 @@
 #include <vector>
 #include <cctype>
 #include <algorithm>
+#include <sstream>
+#include <cstdlib>
 
 void atbash(const std::string &a, std::string &out){
     out="";
@@ -305,24 +307,26 @@ void build_bifid_grid(const std::string rows[5], char grid[6][6], int row_of[256
 
 void bifid_encrypt(const std::string &msg, std::string &out, char grid[6][6], int row_of[256], int col_of[256]) {
     int n = msg.size();
-    std::vector<int> flat(2*n);
-    for (int i = 0; i < n; i++) flat[i]     = row_of[(int)msg[i]];
-    for (int i = 0; i < n; i++) flat[n + i] = col_of[(int)msg[i]];
+    std::vector<int> flat(2 * n + 1, 0);
+    for (int i = 0; i < n; i++) {
+        flat[i]     = (row_of[(unsigned char)msg[i]] > 0) ? row_of[(unsigned char)msg[i]] : 1;
+        flat[n + i] = (col_of[(unsigned char)msg[i]] > 0) ? col_of[(unsigned char)msg[i]] : 1;
+    }
     out = "";
     for (int i = 0; i < 2*n; i += 2)
-        out += grid[flat[i]][flat[i+1]];
+        out += grid[flat[i] > 0 ? flat[i] : 1][flat[i+1] > 0 ? flat[i+1] : 1];
 }
 
 void bifid_decrypt(const std::string &msg, std::string &out, char grid[6][6], int row_of[256], int col_of[256]) {
     int n = msg.size();
-    std::vector<int> flat(2*n);
+    std::vector<int> flat(2 * n + 1, 0);
     for (int i = 0; i < n; i++) {
-        flat[2*i]     = row_of[(int)msg[i]];
-        flat[2*i + 1] = col_of[(int)msg[i]];
+        flat[2*i]     = (row_of[(unsigned char)msg[i]] > 0) ? row_of[(unsigned char)msg[i]] : 1;
+        flat[2*i + 1] = (col_of[(unsigned char)msg[i]] > 0) ? col_of[(unsigned char)msg[i]] : 1;
     }
     out = "";
     for (int i = 0; i < n; i++)
-        out += grid[flat[i]][flat[n + i]];
+        out += grid[flat[i] > 0 ? flat[i] : 1][flat[n + i] > 0 ? flat[n + i] : 1];
 }
 
 int mod_inverse(int a, int m) {
@@ -400,11 +404,13 @@ void trifid(const std::string &a, std::string &out, const std::string &key, int 
             for (int i = 0; i < blen; i++) { flat[blen+i]   = rows[i]; }
             for (int i = 0; i < blen; i++) { flat[2*blen+i] = cols[i]; }
             for (int i = 0; i < blen; i++)
-                out += trifid_char(grid, flat[i], flat[blen+i], flat[2*blen+i]);
+                out += trifid_char(grid, flat[3*i], flat[3*i+1], flat[3*i+2]);
         } else {
             std::vector<int> flat(blen * 3);
             for (int i = 0; i < blen; i++) {
-                trifid_find(grid, clean[start+i], flat[i], flat[blen+i], flat[2*blen+i]);
+                int l, r, c;
+                trifid_find(grid, clean[start+i], l, r, c);
+                flat[3*i] = l; flat[3*i+1] = r; flat[3*i+2] = c;
             }
             for (int i = 0; i < blen; i++)
                 out += trifid_char(grid, flat[i], flat[blen+i], flat[2*blen+i]);
@@ -745,5 +751,187 @@ void braille_decode(const std::string &a, std::string &out) {
         } else {
             token += c;
         }
+    }
+}
+
+void porta(const std::string &a, const std::string &key, std::string &out) {
+    out = "";
+    static const char *rows[13][13] = {
+        {"AN","BO","CP","DQ","ER","FS","GT","HU","IV","JW","KX","LY","MZ"},
+        {"AO","BP","CQ","DR","ES","FT","GU","HV","IW","JX","KY","LZ","MN"},
+        {"AP","BQ","CR","DS","ET","FU","GV","HW","IX","JY","KZ","LN","MO"},
+        {"AQ","BR","CS","DT","EU","FV","GW","HX","IY","JZ","KN","LO","MP"},
+        {"AR","BS","CT","DU","EV","FW","GX","HY","IZ","JN","KO","LP","MQ"},
+        {"AS","BT","CU","DV","EW","FX","GY","HZ","IN","JO","KP","LQ","MR"},
+        {"AT","BU","CV","DW","EX","FY","GZ","HN","IO","JP","KQ","LR","MS"},
+        {"AU","BV","CW","DX","EY","FZ","GN","HO","IP","JQ","KR","LS","MT"},
+        {"AV","BW","CX","DY","EZ","FN","GO","HP","IQ","JR","KS","LT","MU"},
+        {"AW","BX","CY","DZ","EN","FO","GP","HQ","IR","JS","KT","LU","MV"},
+        {"AX","BY","CZ","DN","EO","FP","GQ","HR","IS","JT","KU","LV","MW"},
+        {"AY","BZ","CN","DO","EP","FQ","GR","HS","IT","JU","KV","LW","MX"},
+        {"AZ","BN","CO","DP","EQ","FR","GS","HT","IU","JV","KW","LX","MY"},
+    };
+    for (size_t i = 0; i < a.size(); i++) {
+        char c = a[i];
+        if (isalpha((unsigned char)c)) {
+            char uc = toupper((unsigned char)c);
+            int k = toupper((unsigned char)key[i % key.size()]) - 'A';
+            int ri = k % 13;
+            char replaced = 0;
+            for (int p = 0; p < 13; p++) {
+                if (rows[ri][p][0] == uc) { replaced = rows[ri][p][1]; break; }
+                if (rows[ri][p][1] == uc) { replaced = rows[ri][p][0]; break; }
+            }
+            char outch = replaced ? replaced : uc;
+            if (islower((unsigned char)c)) outch = tolower((unsigned char)outch);
+            out += outch;
+        } else {
+            out += c;
+        }
+    }
+}
+
+void gronsfeld(const std::string &a, const std::string &key, std::string &out, bool encrypt) {
+    out = "";
+    for (size_t i = 0; i < a.size(); i++) {
+        char c = a[i];
+        if (isalpha((unsigned char)c)) {
+            char base = isupper((unsigned char)c) ? 'A' : 'a';
+            int shift = key[i % key.size()] - '0';
+            int pos;
+            if (encrypt)
+                pos = (c - base + shift) % 26;
+            else
+                pos = (c - base - shift + 26 * 26) % 26;
+            out += (char)(pos + base);
+        } else {
+            out += c;
+        }
+    }
+}
+
+bool hill_encrypt(const std::string &a, std::string &out, int a11, int a12, int a21, int a22) {
+    out = "";
+    std::string clean;
+    for (char c : a) {
+        if (isalpha((unsigned char)c)) clean += toupper((unsigned char)c);
+    }
+    if (clean.empty()) return true;
+    if (clean.length() % 2 != 0) clean += 'X';
+    for (size_t i = 0; i < clean.length(); i += 2) {
+        int p1 = clean[i] - 'A';
+        int p2 = clean[i+1] - 'A';
+        int c1 = (a11 * p1 + a12 * p2) % 26;
+        int c2 = (a21 * p1 + a22 * p2) % 26;
+        if (c1 < 0) c1 += 26;
+        if (c2 < 0) c2 += 26;
+        out += (char)(c1 + 'A');
+        out += (char)(c2 + 'A');
+    }
+    return true;
+}
+
+bool hill_decrypt(const std::string &a, std::string &out, int a11, int a12, int a21, int a22) {
+    out = "";
+    int det = (a11 * a22 - a12 * a21) % 26;
+    if (det < 0) det += 26;
+    int inv = mod_inverse(det, 26);
+    if (inv == -1) return false;
+    int b11 = (a22 * inv) % 26;
+    if (b11 < 0) b11 += 26;
+    int b12 = ((-a12) % 26 + 26) * inv % 26;
+    int b21 = ((-a21) % 26 + 26) * inv % 26;
+    int b22 = (a11 * inv) % 26;
+    std::string clean;
+    for (char c : a) {
+        if (isalpha((unsigned char)c)) clean += toupper((unsigned char)c);
+    }
+    if (clean.empty()) return true;
+    if (clean.length() % 2 != 0) clean += 'X';
+    for (size_t i = 0; i < clean.length(); i += 2) {
+        int c1 = clean[i] - 'A';
+        int c2 = clean[i+1] - 'A';
+        int p1 = (b11 * c1 + b12 * c2) % 26;
+        int p2 = (b21 * c1 + b22 * c2) % 26;
+        if (p1 < 0) p1 += 26;
+        if (p2 < 0) p2 += 26;
+        out += (char)(p1 + 'A');
+        out += (char)(p2 + 'A');
+    }
+    return true;
+}
+
+// Build 5x5 Polybius square from keyword (handling J->I, skipping dupes)
+static void build_nihilist_grid(const std::string &key, char grid[5][5], int row_of[256], int col_of[256]) {
+    bool used[26] = {};
+    used['J'-'A'] = true;
+    std::string seq;
+    for (char c : key) {
+        if (c >= 'a' && c <= 'z') c = c-'a'+'A';
+        if (c < 'A' || c > 'Z') continue;
+        if (c == 'J') c = 'I';
+        if (!used[c-'A']) { seq += c; used[c-'A'] = true; }
+    }
+    for (char c = 'A'; c <= 'Z'; c++) {
+        if (!used[c-'A']) { seq += c; used[c-'A'] = true; }
+    }
+    for (int i = 0; i < 5; i++)
+        for (int j = 0; j < 5; j++) {
+            char ch = seq[i*5 + j];
+            grid[i][j] = ch;
+            row_of[(int)ch] = i + 1;
+            col_of[(int)ch] = j + 1;
+        }
+}
+
+void nihilist_encrypt(const std::string &a, std::string &out, const std::string &key) {
+    out = "";
+    char grid[5][5];
+    int row_of[256] = {}, col_of[256] = {};
+    build_nihilist_grid(key, grid, row_of, col_of);
+    std::string clean;
+    for (char c : a) {
+        if (c >= 'a' && c <= 'z') c = c-'a'+'A';
+        if (c == 'J') c = 'I';
+        if (c >= 'A' && c <= 'Z') clean += c;
+    }
+    std::vector<int> key_digits;
+    for (char d : key) {
+        if (d >= '0' && d <= '9') key_digits.push_back(d - '0');
+        else key_digits.push_back(toupper((unsigned char)d) - 64);
+    }
+    if (key_digits.empty()) key_digits.push_back(0);
+    for (size_t i = 0; i < clean.size(); i++) {
+        int r = row_of[(int)clean[i]];
+        int c = col_of[(int)clean[i]];
+        int val = r * 10 + c;
+        val += key_digits[i % key_digits.size()];
+        if (!out.empty()) out += ' ';
+        out += std::to_string(val);
+    }
+}
+
+void nihilist_decrypt(const std::string &a, std::string &out, const std::string &key) {
+    out = "";
+    char grid[5][5];
+    int row_of[256] = {}, col_of[256] = {};
+    build_nihilist_grid(key, grid, row_of, col_of);
+    std::vector<int> key_digits;
+    for (char d : key) {
+        if (d >= '0' && d <= '9') key_digits.push_back(d - '0');
+        else key_digits.push_back(toupper((unsigned char)d) - 64);
+    }
+    if (key_digits.empty()) key_digits.push_back(0);
+    std::stringstream ss(a);
+    std::string token;
+    int idx = 0;
+    while (ss >> token) {
+        int val = std::atoi(token.c_str());
+        val -= key_digits[idx % key_digits.size()];
+        idx++;
+        int r = val / 10;
+        int c = val % 10;
+        if (r >= 1 && r <= 5 && c >= 1 && c <= 5)
+            out += grid[r-1][c-1];
     }
 }
