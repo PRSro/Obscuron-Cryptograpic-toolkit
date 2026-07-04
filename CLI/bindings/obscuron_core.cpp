@@ -43,9 +43,9 @@ PYBIND11_MODULE(_obscuron_core, m) {
     m.def("a1z26", [](const std::string &a, char sep) {
         std::string out; a1z26(a, out, sep); return out;
     }, py::arg("text"), py::arg("sep") = '-');
-    m.def("keyboard_shift", [](const std::string &a, int n, bool encrypt) {
-        std::string out; keyboard_shift(a, out, n, encrypt); return out;
-    }, py::arg("text"), py::arg("rows"), py::arg("encrypt") = true);
+    m.def("keyboard_shift", [](const std::string &a, int dx, int dy, bool encrypt) {
+        std::string out; keyboard_shift(a, out, dx, dy, encrypt); return out;
+    }, py::arg("text"), py::arg("dx"), py::arg("dy") = 0, py::arg("encrypt") = true);
 
     // ── historical_ciphers ──
 

@@ -268,7 +268,7 @@ std::string RecipeEngine::executeSingleStep(const std::string &input, const Reci
         } else if (op == "A1Z26") {
             a1z26(input, out);
         } else if (op == "Keyboard Shift") {
-            keyboard_shift(input, out, p.param1, p.encrypt);
+            keyboard_shift(input, out, p.param1, p.param2, p.encrypt);
         } else if (op == "Beaufort") {
             if (p.key.empty()) { success = false; error_msg = "Key cannot be empty"; return input; }
             beaufort(input, p.key, out);

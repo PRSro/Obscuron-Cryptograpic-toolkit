@@ -140,12 +140,23 @@ void BaseWindow::onRun() {
     std::string out;
 
     try {
+        if (base < 2) {
+            outputArea->setPlainText("Error: Base must be >= 2");
+            return;
+        }
         if (encode) {
+            if (!alphabet.empty() && (int)alphabet.size() < base) {
+                outputArea->setPlainText(QString("Error: Alphabet length (%1) < base (%2)")
+                    .arg(alphabet.size()).arg(base));
+                return;
+            }
             BigInt n = BigInt::from_bytes(input);
             out = n.toBase(base, alphabet);
+            if (out.empty() && !input.empty()) {
+                out = "(empty result — input may be all zeros or invalid for this base)";
+            }
         } else {
-            BigInt n = BigInt::from_base(input, base, alphabet);
-            out = n.toBytes();
+            out = BigInt::from_base(input, base, alphabet).toBytes();
         }
         outputArea->setPlainText(QString::fromStdString(out));
     } catch (std::exception &e) {

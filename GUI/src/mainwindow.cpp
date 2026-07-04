@@ -172,16 +172,16 @@ void MainWindow::setupUI() {
     topBar->addWidget(title, 1, Qt::AlignCenter);
 
     // Mode selector buttons
-    auto makeModeBtn = [&](const QString &text) {
+    auto makeModeBtn = [&](const QString &text, int w = 130) {
         QPushButton *btn = new QPushButton(text);
         btn->setCheckable(true);
-        btn->setFixedWidth(130);
+        btn->setFixedWidth(w);
         btn->setObjectName("accentButton");
         return btn;
     };
     m_workspaceBtn = makeModeBtn("WORKSPACE");
     m_networkBtn = makeModeBtn("NETWORK");
-    m_stegoBtn = makeModeBtn("STEGANOGRAPHY");
+    m_stegoBtn = makeModeBtn("STEGANOGRAPHY", 150);
     topBar->addWidget(m_workspaceBtn);
     topBar->addWidget(m_networkBtn);
     topBar->addWidget(m_stegoBtn);
@@ -231,7 +231,7 @@ void MainWindow::setupUI() {
     connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
 
     QPushButton *scriptBtn = new QPushButton("SCRIPT");
-    scriptBtn->setFixedWidth(70);
+    scriptBtn->setFixedWidth(85);
     scriptBtn->setObjectName("accentButton");
     topBar->addWidget(scriptBtn);
     connect(scriptBtn, &QPushButton::clicked, this, [this]{
@@ -244,7 +244,7 @@ void MainWindow::setupUI() {
     });
 
     QPushButton *advancedBtn = new QPushButton("ADVANCED");
-    advancedBtn->setFixedWidth(100);
+    advancedBtn->setFixedWidth(115);
     advancedBtn->setObjectName("accentButton");
     {
         auto *glow = new QGraphicsDropShadowEffect(advancedBtn);
@@ -1020,7 +1020,8 @@ void MainWindow::updateSettingsPanel(int stepIndex) {
         addLineEdit("Keys:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });
         addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Keyboard Shift") {
-        addSpinBox("Shift:", -10, 10, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addSpinBox("DX:", -10, 10, step.params.param1, [](RecipeStep &s, int v) { s.params.param1 = v; });
+        addSpinBox("DY:", -10, 10, step.params.param2, [](RecipeStep &s, int v) { s.params.param2 = v; });
         addCheckbox("Decrypt instead", !step.params.encrypt, [](RecipeStep &s, bool c) { s.params.encrypt = !c; });
     } else if (op == "Porta") {
         addLineEdit("Key:", step.params.key, [](RecipeStep &s, const std::string &v) { s.params.key = v; });

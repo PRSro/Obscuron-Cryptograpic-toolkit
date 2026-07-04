@@ -75,6 +75,7 @@ Context parse_args(int argc, char *argv[]) {
         "-s","-k","--steps","--min-confidence","--top","--max-depth",
         "-e","-n","-a","-b","-c","-d","-e1","-e2","-c1","-c2",
         "-p","--e","--oracle","--timeout","-i","--ciphertexts",
+        "-x","-y",
         "--moduli","--x1","--y1","--x2","--y2","--a","--p",
         "--k","--x","--y","--g","--h","--matrix",
         "--b","--key","--text","--iv","--nonce","--aad","--tag",

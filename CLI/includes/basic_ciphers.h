@@ -27,7 +27,7 @@ void base_deconvert_full(const std::string &a, long long &b, int base);
 void custom_rot(const std::string &a, int add, std::string &out);
 void rot13(const std::string &a, std::string &out);
 void a1z26(const std::string &a, std::string &out, char sep='-');
-void keyboard_shift(const std::string &a, std::string &out, int n, bool encrypt);
+void keyboard_shift(const std::string &a, std::string &out, int dx, int dy, bool encrypt);
 void suggestions();
 
 #endif

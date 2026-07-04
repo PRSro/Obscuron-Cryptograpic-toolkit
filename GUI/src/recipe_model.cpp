@@ -233,22 +233,26 @@ RecipeDelegate::HitArea RecipeDelegate::hitTest(const QRect &itemRect, const QPo
     int right = itemRect.right() - 8;
     int y = itemRect.top() + (itemRect.height() - BTN_W) / 2;
 
-    // Delete (22px)
+    // Delete (22px) — matches paint: right -= 22; drawBtn(right, 22, ...)
+    right -= 22;
     QRect del(right - 22, y, 22, BTN_W);
     if (del.contains(pos)) return DeleteBtn;
     right -= 28;
 
     // Toggle (24px)
+    right -= 24;
     QRect tog(right - 24, y, 24, BTN_W);
     if (tog.contains(pos)) return ToggleBtn;
     right -= 30;
 
     // Down (22px)
+    right -= 22;
     QRect dn(right - 22, y, 22, BTN_W);
     if (dn.contains(pos)) return DownBtn;
     right -= 28;
 
     // Up (22px)
+    right -= 22;
     QRect up(right - 22, y, 22, BTN_W);
     if (up.contains(pos)) return UpBtn;
 

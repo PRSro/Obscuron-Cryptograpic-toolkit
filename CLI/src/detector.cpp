@@ -2143,14 +2143,14 @@ static std::vector<CipherCandidate> pass_keyboard_shift(const std::string &input
     for (int n = 1; n <= 2; n++) {
         for (int enc = 0; enc <= 1; enc++) {
             std::string out;
-            keyboard_shift(input, out, n, enc == 1);
+            keyboard_shift(input, out, n, 0, enc == 1);
             double chi = score_english_combined(out);
             if (chi < best_chi) { best_chi = chi; best_n = n; best_enc = (enc == 1); }
         }
     }
     if (best_n > 0 && best_chi < input_chi * 0.6) {
         std::string out;
-        keyboard_shift(input, out, best_n, best_enc);
+        keyboard_shift(input, out, best_n, 0, best_enc);
         CipherCandidate c;
         c.cipher_name = "keyboard-shift";
         c.decrypted = out;
@@ -2306,34 +2306,57 @@ static std::vector<CipherCandidate> pass_large_base(const std::string &input) {
         else if (prev_space) { token_count++; prev_space = false; }
     }
     if (space_count < 2 || token_count < 3) return results;
-    int bases_to_try[] = {2, 8, 10, 16, 32, 36, 62};
+
+    // Determine min base from the highest character value used across tokens
+    int min_base = 2;
+    std::string token;
+    for (unsigned char ch : input + " ") {
+        if (std::isspace(ch)) {
+            if (token.empty()) continue;
+            for (unsigned char tc : token) {
+                unsigned char lc = (unsigned char)std::tolower(tc);
+                size_t p = alphabet.find(lc);
+                if (p == std::string::npos) {
+                    p = alphabet_full.find(lc);
+                    if (p == std::string::npos) return results;
+                }
+                if ((int)p >= min_base) min_base = (int)p + 1;
+            }
+            token.clear();
+        } else {
+            token += ch;
+        }
+    }
+
     struct BaseCand { int base; double score; std::string decoded; };
     std::vector<BaseCand> cands;
-    for (int base : bases_to_try) {
+    int max_try = std::min(84, (int)alphabet_full.size());
+    for (int base = min_base; base <= max_try; base++) {
         if (base >= 36) {
             bool has_digit = false;
             for (unsigned char ch : input)
                 if (ch >= '0' && ch <= '9') { has_digit = true; break; }
             if (!has_digit) continue;
         }
+        const std::string &abc = (base <= 62) ? alphabet : alphabet_full;
         bool valid[256] = {false};
-        for (int i = 0; i < base && i < (int)alphabet.size(); i++)
-            valid[(unsigned char)alphabet[i]] = true;
-        std::string token;
+        for (int i = 0; i < base && i < (int)abc.size(); i++)
+            valid[(unsigned char)abc[i]] = true;
+        std::string t;
         bool all_valid = true;
         bool has_tokens = false;
         for (unsigned char ch : input + " ") {
             if (std::isspace(ch)) {
-                if (token.empty()) continue;
+                if (t.empty()) continue;
                 has_tokens = true;
-                for (unsigned char tc : token) {
+                for (unsigned char tc : t) {
                     unsigned char lc = (unsigned char)std::tolower(tc);
                     if (!valid[lc]) { all_valid = false; break; }
                 }
                 if (!all_valid) break;
-                token.clear();
+                t.clear();
             } else {
-                token += ch;
+                t += ch;
             }
         }
         if (!all_valid || !has_tokens) continue;

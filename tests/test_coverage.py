@@ -214,16 +214,24 @@ def test_a1z26_encode():
 
 
 def test_keyboard_shift_encrypt():
-    rc, out, err = ob_run("keyboard-shift", "-s", "1", "hello")
+    rc, out, err = ob_run("keyboard-shift", "-x", "1", "hello")
     assert rc == 0, err
     assert len(out.strip()) > 0
 
 
 def test_keyboard_shift_roundtrip():
     msg = "hello"
-    enc = ob_run("keyboard-shift", "-s", "1", msg)[1].strip()
-    dec = ob_run("keyboard-shift", "-s", "1", "--decrypt", enc)[1].strip()
+    enc = ob_run("keyboard-shift", "-x", "1", msg)[1].strip()
+    dec = ob_run("keyboard-shift", "-x", "1", "--decrypt", enc)[1].strip()
     assert dec == msg
+
+
+def test_keyboard_shift_diagonal():
+    msg = "test"
+    enc = ob_run("keyboard-shift", "-x", "1", "-y", "1", msg)[1].strip()
+    rc, out, err = ob_run("keyboard-shift", "-x", "1", "-y", "1", "--decrypt", enc)
+    assert rc == 0, err
+    assert out.strip() == msg
 
 
 def test_autokey_encrypt():

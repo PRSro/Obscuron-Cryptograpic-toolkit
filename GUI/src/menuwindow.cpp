@@ -12,7 +12,8 @@
 
 MenuWindow::MenuWindow(QWidget *parent) : QMainWindow(parent) {
     setWindowTitle("Obscuron Cryptographic Suite");
-    setFixedSize(640, 480);
+    setMinimumSize(640, 560);
+    resize(640, 560);
 
     QSettings s("Obscuron", "CryptoSuite");
     int themeIdx = s.value("theme/index", 0).toInt();

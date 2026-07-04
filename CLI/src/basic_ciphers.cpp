@@ -177,22 +177,24 @@ void a1z26(const std::string &a, std::string &out, char sep){
     }
 }
 
-void keyboard_shift(const std::string &a, std::string &out, int n, bool encrypt) {
+void keyboard_shift(const std::string &a, std::string &out, int dx, int dy, bool encrypt) {
     out = "";
-    int shift = encrypt ? n : -n;
+    int sx = encrypt ? dx : -dx;
+    int sy = encrypt ? dy : -dy;
     for (char c : a) {
         char lower = (c >= 'A' && c <= 'Z') ? c-'A'+'a' : c;
         bool found = false;
-        for (int row = 0; row < 3; row++) {
+        for (int row = 0; row < 3 && !found; row++) {
             size_t pos = KB_ROWS[row].find(lower);
             if (pos != std::string::npos) {
-                int len = KB_ROWS[row].length();
-                int newpos = ((int)pos + shift % len + len) % len;
-                char result = KB_ROWS[row][newpos];
+                int new_row = ((row + sy) % 3 + 3) % 3;
+                int tgt_len = (int)KB_ROWS[new_row].length();
+                int clamped = (int)pos < tgt_len ? (int)pos : tgt_len - 1;
+                int new_col = ((clamped + sx) % tgt_len + tgt_len) % tgt_len;
+                char result = KB_ROWS[new_row][new_col];
                 if (c >= 'A' && c <= 'Z') result = result-'a'+'A';
                 out += result;
                 found = true;
-                break;
             }
         }
         if (!found) out += c;

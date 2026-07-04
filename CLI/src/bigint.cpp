@@ -424,8 +424,10 @@ static const std::string BASE_ALPHABET =
     "!#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\"";
 
 std::string BigInt::toBase(int base, const std::string& alphabet) const {
+    if (base < 2) return "";
     std::string abc = alphabet.empty() ? BASE_ALPHABET.substr(0, base) : alphabet;
-    if (base < 2 || (int)abc.size() < base) return "";
+    if ((int)abc.size() < base) return "";
+    if (limbs.empty()) return std::string(1, abc[0]);
     if (*this == BigInt(0ULL)) return std::string(1, abc[0]);
     BigInt n = *this;
     n.negative = false;
@@ -441,7 +443,12 @@ std::string BigInt::toBase(int base, const std::string& alphabet) const {
 }
 
 BigInt BigInt::from_base(const std::string& str, int base, const std::string& alphabet) {
+    if (base < 2)
+        throw std::runtime_error("BigInt::from_base: base must be >= 2, got " + std::to_string(base));
     std::string abc = alphabet.empty() ? BASE_ALPHABET.substr(0, base) : alphabet;
+    if ((int)abc.size() < base)
+        throw std::runtime_error("BigInt::from_base: alphabet length (" + std::to_string(abc.size())
+            + ") < base (" + std::to_string(base) + ")");
     BigInt result(0ULL);
     BigInt base_big((uint64_t)base);
     for (char c : str) {

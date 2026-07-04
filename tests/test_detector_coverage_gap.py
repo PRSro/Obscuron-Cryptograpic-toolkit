@@ -191,12 +191,12 @@ def test_detect_rsa_pem_cert():
 # ── Keyboard Shift (conditional pass: >=10 letters, best_chi < input_chi*0.6) ──
 
 def test_detect_keyboard_shift1():
-    encrypt_and_detect("keyboard-shift", "-s", "1", expected=["keyboard-shift"])
+    encrypt_and_detect("keyboard-shift", "-x", "1", expected=["keyboard-shift"])
 
 
 def test_detect_keyboard_shift_left():
     encrypt_and_detect(
-        "keyboard-shift", "-s", "1", "--decrypt",
+        "keyboard-shift", "-x", "1", "--decrypt",
         expected=["keyboard-shift"],
     )
 

@@ -24,7 +24,7 @@ void register_basic_handlers(HandlerMap &map) {
 
     map["keyboard-shift"] = [](const Context &ctx) {
         std::string out;
-        keyboard_shift(ctx.input, out, ctx.int_flag("-s"), !ctx.has("--decrypt"));
+        keyboard_shift(ctx.input, out, ctx.opt_int_flag("-x", 0), ctx.opt_int_flag("-y", 0), !ctx.has("--decrypt"));
         print_result(ctx, out);
     };
     map["keyboard_shift"] = map["keyboard-shift"];
